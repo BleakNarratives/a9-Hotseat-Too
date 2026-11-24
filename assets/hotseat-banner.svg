@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 240" width="900" height="240">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#140e0c"/>
+      <stop offset="55%" stop-color="#3b1116"/>
+      <stop offset="100%" stop-color="#7a1c24"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#b8292f"/>
+      <stop offset="100%" stop-color="#e3a857"/>
+    </linearGradient>
+  </defs>
+  <rect width="900" height="240" rx="12" fill="url(#bg)"/>
+  <rect x="28" y="28" width="844" height="184" rx="8" fill="none" stroke="#e3a857" stroke-opacity="0.35" stroke-width="1.5"/>
+  <rect x="48" y="54" width="8" height="132" rx="4" fill="url(#accent)"/>
+  <text x="76" y="102" fill="#f5e6cc" font-family="monospace" font-size="42" font-weight="bold" letter-spacing="3">HOTSEAT-TOO</text>
+  <text x="76" y="138" fill="#e3a857" font-family="monospace" font-size="16" letter-spacing="1.5">MULTI-PERSONA INTERROGATION &amp; AGENT ARENA ENGINE</text>
+  <text x="76" y="174" fill="#cbb799" font-family="monospace" font-size="13">Classic CLI  •  Web Arena (v2)  •  Agent &amp; Ollama Runner (v3)  •  FreeBuff Bridge</text>
+</svg>
