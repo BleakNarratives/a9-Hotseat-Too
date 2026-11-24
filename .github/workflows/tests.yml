@@ -2,8 +2,9 @@ name: tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, arena-baseline]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -20,5 +21,66 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Syntax-check browser clients
+        run: node --check hotseat_core/web/app.js hotseat_core/web/mobile.js
       - name: Run the core test suite (no dependencies)
         run: python -m unittest discover -s tests -t . -v
+
+  package:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build the wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --wheel
+      - name: Install the wheel in a fresh venv
+        run: |
+          python -m venv "$RUNNER_TEMP/hotseat-venv"
+          "$RUNNER_TEMP/hotseat-venv/bin/python" -m pip install --upgrade pip
+          "$RUNNER_TEMP/hotseat-venv/bin/python" -m pip install dist/*.whl
+      - name: Verify the console entry point
+        run: |
+          "$RUNNER_TEMP/hotseat-venv/bin/hotseat" --version | tee "$RUNNER_TEMP/hotseat-version.txt"
+          grep -qx 'hotseat 0.5.0' "$RUNNER_TEMP/hotseat-version.txt"
+      - name: Smoke-test the installed static assets
+        env:
+          HOTSEAT_DATA_DIR: ${{ runner.temp }}/hotseat-data
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          port="$(python -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
+          "$RUNNER_TEMP/hotseat-venv/bin/hotseat" --serve --host 127.0.0.1 --port "$port" > "$RUNNER_TEMP/hotseat.log" 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true' EXIT
+
+          ready=false
+          for attempt in $(seq 1 50); do
+            if curl -fsS "http://127.0.0.1:$port/health" >/dev/null; then
+              ready=true
+              break
+            fi
+            sleep 0.2
+          done
+          if [ "$ready" != "true" ]; then
+            cat "$RUNNER_TEMP/hotseat.log"
+            exit 1
+          fi
+
+          curl -fsS "http://127.0.0.1:$port/" -o "$RUNNER_TEMP/index.html"
+          curl -fsS "http://127.0.0.1:$port/m" -o "$RUNNER_TEMP/mobile.html"
+          curl -fsS "http://127.0.0.1:$port/mobile.css" -o "$RUNNER_TEMP/mobile.css"
+          curl -fsS "http://127.0.0.1:$port/mobile.js" -o "$RUNNER_TEMP/mobile.js"
+          grep -q 'THE HOT SEAT' "$RUNNER_TEMP/index.html"
+          grep -q 'COMPANION' "$RUNNER_TEMP/mobile.html"
+          grep -q 'safe-area-inset-bottom' "$RUNNER_TEMP/mobile.css"
+          grep -q 'CONVENE THE ROOM' "$RUNNER_TEMP/mobile.js"
+          curl -fsS -o /dev/null -w '%{http_code} %{content_type}\n' "http://127.0.0.1:$port/mobile.css" | grep -q '^200 text/css'
+          curl -fsS -o /dev/null -w '%{http_code} %{content_type}\n' "http://127.0.0.1:$port/mobile.js" | grep -q '^200 text/javascript'

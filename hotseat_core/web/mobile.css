@@ -374,7 +374,7 @@ select:focus { border-color: var(--accent); outline: none; }
   font-size: 9px;
   letter-spacing: .06em;
 }
-.provider-row[data-ready="true"] { border-color: rgba(143, 168, 107, .55); color: var(--ink); }
+.provider-row[data-configured="true"] { border-color: rgba(143, 168, 107, .55); color: var(--ink); }
 .provider-row strong { font-weight: 400; }
 .provider-row span { color: var(--dim); font-size: 8px; }
 

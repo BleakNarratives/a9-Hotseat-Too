@@ -362,8 +362,8 @@ html[data-theme="switchboard"] .controls { background: linear-gradient(180deg, v
   text-transform: uppercase;
 }
 .provider-badge::before { content: "○"; color: var(--dim); }
-.provider-badge[data-state="ready"] { color: var(--ink); border-color: var(--good); }
-.provider-badge[data-state="ready"]::before { content: "●"; color: var(--good); }
+.provider-badge[data-state="configured"] { color: var(--ink); border-color: var(--good); }
+.provider-badge[data-state="configured"]::before { content: "●"; color: var(--good); }
 .provider-badge[data-state="missing"] { opacity: .55; }
 
 .roles-toggle { width: 100%; margin-bottom: 8px; }

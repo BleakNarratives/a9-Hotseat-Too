@@ -228,7 +228,7 @@
           value: item.name,
           label:
             item.name.toUpperCase() +
-            (item.offline ? " // OFFLINE" : item.requires_key ? (missing ? " // NO KEY" : " // READY") : " // LOCAL"),
+            (item.offline ? " // OFFLINE" : item.requires_key ? (missing ? " // NO KEY" : " // CONFIGURED") : " // LOCAL"),
           title: missing
             ? "No credential found in env, repo .env, or ~/.concierge/vault.json."
             : item.requires_key
@@ -253,11 +253,11 @@
       detail.textContent = "session can still use auto";
       return;
     }
-    const ready = rows.filter((row) => row.configured);
+    const configured = rows.filter((row) => row.configured);
     const missing = rows.filter((row) => row.requires_key && !row.configured);
-    summary.textContent = ready.length + " READY · " + missing.length + " MISSING";
-    detail.textContent = ready.length
-      ? ready.slice(0, 4).map((row) => row.name).join(" · ")
+    summary.textContent = configured.length + " CONFIGURED · " + missing.length + " MISSING";
+    detail.textContent = configured.length
+      ? configured.slice(0, 4).map((row) => row.name).join(" · ")
       : "add a key in .env or the vault";
   }
 
@@ -270,10 +270,10 @@
     }
     rows.forEach((row) => {
       const item = el("div", "provider-row");
-      item.dataset.ready = row.configured ? "true" : "false";
+      item.dataset.configured = row.configured ? "true" : "false";
       item.appendChild(el("strong", "", row.name.toUpperCase()));
       item.appendChild(
-        el("span", "", row.configured ? (row.requires_key ? "READY" : "LOCAL") : "MISSING KEY")
+        el("span", "", row.configured ? (row.requires_key ? "CONFIGURED" : "LOCAL") : "MISSING KEY")
       );
       box.appendChild(item);
     });

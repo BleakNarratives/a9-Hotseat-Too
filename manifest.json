@@ -1,8 +1,10 @@
 {
   "meta": {
     "name": "Hotseat-Too",
-    "description": "Local-first AI pressure cooker: idea audit, debate, personal panel, and a one-pass BMAD build brief.",
-    "entrypoint": "python -m hotseat_core",
+    "version": "0.5.0",
+    "description": "Local-first AI pressure cooker: idea audit, arena, debate, personal panel, and a one-pass BMAD build brief.",
+    "entrypoint": "hotseat",
+    "console_script": "hotseat",
     "python": ">=3.10",
     "tests": "python -m unittest discover -s tests -t ."
   },

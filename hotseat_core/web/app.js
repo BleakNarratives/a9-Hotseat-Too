@@ -191,7 +191,7 @@
           value: item.name,
           label:
             item.name.toUpperCase() +
-            (item.offline ? " // OFFLINE" : item.requires_key ? (missing ? " // NO KEY" : " // READY") : " // LOCAL"),
+            (item.offline ? " // OFFLINE" : item.requires_key ? (missing ? " // NO KEY" : " // CONFIGURED") : " // LOCAL"),
           title: missing
             ? "No credential found in env, repo .env, or ~/.concierge/vault.json."
             : item.requires_key
@@ -211,7 +211,7 @@
     clear(box);
     rows.forEach((row) => {
       const badge = el("span", "provider-badge", row.name.toUpperCase());
-      badge.dataset.state = row.configured ? "ready" : "missing";
+      badge.dataset.state = row.configured ? "configured" : "missing";
       badge.title = row.configured
         ? row.requires_key
           ? "Credential discovered (" + (row.credential_names || []).join(" / ") + ")"

@@ -12,12 +12,14 @@ from __future__ import annotations
 import argparse
 import json
 import queue
+import re
 import sys
 import threading
 import uuid
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from importlib import resources
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 from urllib.parse import parse_qs, unquote, urlparse
@@ -40,6 +42,13 @@ STATIC_FILES = {
     "mobile.css": "text/css; charset=utf-8",
     "mobile.js": "text/javascript; charset=utf-8",
 }
+_TOKEN_QUERY = re.compile(r"([?&]token=)[^&\s\"]*", re.IGNORECASE)
+
+
+def _redact_token(message: str) -> str:
+    """Remove bearer tokens embedded in request-query strings from logs."""
+
+    return _TOKEN_QUERY.sub(r"\1[REDACTED]", message)
 
 
 def _string_list(value: Any) -> tuple[str, ...]:
@@ -147,9 +156,7 @@ class Bridge:
         self.scouts_lock = threading.Lock()
         self.last_scouts: dict[str, Any] | None = None
         self.web_dir = (
-            Path(web_dir).expanduser().resolve()
-            if web_dir is not None
-            else Path(__file__).resolve().parent.parent / "web"
+            Path(web_dir).expanduser().resolve() if web_dir is not None else None
         )
         self.persona_overrides: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
 
@@ -429,7 +436,8 @@ class _Handler(BaseHTTPRequestHandler):
     # ── helpers ───────────────────────────────────────────────────────────────
     def log_message(self, fmt: str, *args: Any) -> None:  # keep stdout clean for NDJSON
         if self.server.verbose:  # type: ignore[attr-defined]
-            sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
+            message = _redact_token(fmt % args)
+            sys.stderr.write("%s - %s\n" % (self.address_string(), message))
 
     def _cors_headers(self) -> dict[str, str]:
         origin = self.headers.get("Origin")
@@ -453,10 +461,29 @@ class _Handler(BaseHTTPRequestHandler):
             provided = (query.get("token") or [""])[0]
         return provided == token
 
-    def _serve_static(self, path: str) -> bool:
+    def _static_body(self, relative: str) -> bytes | None:
+        """Read a whitelisted asset from an override directory or the wheel."""
+
         root = self.bridge.web_dir
-        if root is None or not root.is_dir():
-            return False
+        if root is not None:
+            if not root.is_dir():
+                return None
+            candidate = (root / relative).resolve()
+            if root not in candidate.parents or not candidate.is_file():
+                return None
+            try:
+                return candidate.read_bytes()
+            except OSError:
+                return None
+        try:
+            resource = resources.files("hotseat_core").joinpath("web").joinpath(relative)
+            if not resource.is_file():
+                return None
+            return resource.read_bytes()
+        except (FileNotFoundError, ModuleNotFoundError, OSError):
+            return None
+
+    def _serve_static(self, path: str) -> bool:
         if path in ("", "/"):
             relative = "index.html"
         elif path.rstrip("/") == "/m":
@@ -465,17 +492,14 @@ class _Handler(BaseHTTPRequestHandler):
             relative = unquote(path.lstrip("/"))
         if relative not in STATIC_FILES:
             return False
-        candidate = (root / relative).resolve()
-        if root not in candidate.parents or not candidate.is_file():
-            return False
-        try:
-            body = candidate.read_bytes()
-        except OSError:
+        body = self._static_body(relative)
+        if body is None:
             return False
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", STATIC_FILES[relative])
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-cache")
+        self.send_header("Referrer-Policy", "no-referrer")
         self.end_headers()
         try:
             self.wfile.write(body)

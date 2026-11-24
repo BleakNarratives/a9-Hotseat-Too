@@ -1,6 +1,6 @@
 # Hotseat Bridge — Frontend Contract
 
-**Version:** 0.5 · **Transport:** HTTP/1.1 + Server-Sent Events (SSE) + NDJSON
+**Version:** 0.5.0 · **Transport:** HTTP/1.1 + Server-Sent Events (SSE) + NDJSON
 **Implementation:** [`hotseat_core/bridge.py`](hotseat_core/bridge.py) · **No third-party dependencies**
 
 The bridge lets a CLI, desktop app, or web UI drive a Hotseat session without
@@ -17,13 +17,15 @@ python -m hotseat_core --serve --port 9000
 python -m hotseat_core --serve --provider demo # no keys, no models, demo replies
 ```
 
-`--serve` also hosts the desktop war room at `/`: `web/index.html`,
-`web/style.css`, and `web/app.js`. It is not a canned page; it reads `/modes`,
-`/providers`, `/scouts/latest`, starts sessions through `POST /sessions`, and
-streams the session through SSE.
+`--serve` also hosts the desktop war room at `/`: `hotseat_core/web/index.html`,
+`hotseat_core/web/style.css`, and `hotseat_core/web/app.js`. It is not a canned
+page; it reads `/modes`, `/providers`, `/scouts/latest`, starts sessions through
+`POST /sessions`, and streams the session through SSE. The assets are packaged
+and resolved through `importlib.resources`, so this works from an installed wheel.
 
-Phones and tablets get a dedicated companion at `/m`: `web/mobile.html`,
-`web/mobile.css`, and `web/mobile.js`. It uses the same API and SSE endpoints
+Phones and tablets get a dedicated companion at `/m`:
+`hotseat_core/web/mobile.html`, `hotseat_core/web/mobile.css`, and
+`hotseat_core/web/mobile.js`. It uses the same API and SSE endpoints
 but has a separate setup → live → verdict flow. The desktop page redirects to
 `/m` below 768px unless `?desktop=1` is present. Both shells link to each other.
 Only these six files and the `/m` alias are served — there is no filesystem or
@@ -69,7 +71,7 @@ Errors always have the shape:
 ### `GET /health`
 
 ```json
-{ "status": "ok", "version": "0.2.0" }
+{ "status": "ok", "version": "0.5.0" }
 ```
 
 ### `GET /modes`
@@ -102,10 +104,11 @@ Errors always have the shape:
 
 ### `GET /providers/status`
 
-Credential readiness for every provider. Values are never included; keyed
+Credential presence for every provider. Values are never included; keyed
 providers are `configured` only when a credential resolves from the environment,
 repo `.env`, or the Concierge vault. Local/demo providers need no key and are
-marked configured; reachability is not probed here.
+marked configured. This endpoint does not probe reachability; the UI labels
+keyed providers `CONFIGURED`, never `READY`.
 
 ```json
 {
@@ -460,6 +463,8 @@ document.getElementById("go").onclick = async () => {
 ## 6. Security notes
 
 - Loopback by default; non-loopback binds require `--token`.
+- UI asset responses send `Referrer-Policy: no-referrer`, and `--verbose`
+  request logs redact `?token=` values.
 - Persona editing is runtime-only and never accepts a filesystem path.
 - Session topics and model output are data. A frontend must render them as text,
   not as trusted HTML/markdown with embedded scripts.

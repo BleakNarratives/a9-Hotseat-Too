@@ -1,9 +1,10 @@
 """Modular Hotseat runtime.
 
-The legacy implementations remain untouched under their original trees; this
-package is the supported engine. It has no third-party dependencies for local
-use: provider transport is ``urllib``, storage is ``sqlite3``, and the bridge is
-``http.server``.
+This package is the supported engine. The desktop console and ``/m`` companion
+assets are bundled under ``hotseat_core/web`` and resolved from package
+resources, so an installed wheel serves the same UI as a source checkout. It has
+no third-party dependencies for local use: provider transport is ``urllib``,
+storage is ``sqlite3``, and the bridge is ``http.server``.
 
 Quick start::
 
@@ -42,4 +43,4 @@ __all__ = [
     "resolve_provider",
 ]
 
-__version__ = "0.2.0"
+__version__ = "0.5.0"

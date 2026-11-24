@@ -10,6 +10,7 @@
   <img alt="Core dependencies: none" src="https://img.shields.io/badge/core%20dependencies-none-2ea44f" />
   <a href="https://github.com/BleakNarratives/a9-Hotseat-Too/actions/workflows/tests.yml"><img alt="Tests" src="https://github.com/BleakNarratives/a9-Hotseat-Too/actions/workflows/tests.yml/badge.svg" /></a>
   <img alt="Local first" src="https://img.shields.io/badge/local--first-yes-8957e5" />
+  <img alt="Release 0.5.0" src="https://img.shields.io/badge/release-0.5.0-2ea44f" />
 </p>
 
 **Hotseat-Too** is a local-first AI pressure cooker: a small cast of sharply drawn
@@ -20,6 +21,25 @@ or against any cloud model with your own key.
 One session. Structured turns. A closer who speaks last and short. Persistent
 memory. Structured events for your own frontend. No phases to schedule, no
 document chain to carry between chats.
+
+**Current release:** `0.5.0` — the first packaged build.
+
+## Install
+
+Build the wheel from a checkout and install it:
+
+```bash
+python -m pip install build
+python -m build --wheel
+python -m pip install dist/*.whl
+hotseat --version   # hotseat 0.5.0
+hotseat --provider demo "ship the smallest version this week"
+```
+
+The wheel bundles the desktop console and the `/m` companion under
+`hotseat_core/web`, so `hotseat --serve` serves the same UI from an installed
+package. A source checkout still runs with `python -m hotseat_core` without
+installing anything.
 
 ---
 
@@ -146,13 +166,15 @@ python3 -m hotseat_core --provider openrouter --mode arena "my idea"
 python3 -m hotseat_core --provider mistral --mode bmad "the thing I want to build"
 ```
 
-`.env` is ignored by Git. Nothing is hardcoded, and no key is read for a provider
-you did not select.
+`.env` is ignored by Git. Nothing is hardcoded. Credential values resolve only
+when a selected provider needs them; `GET /providers/status` checks which
+credentials are present for every provider (never values) so the UI can mark the
+keyed ones `CONFIGURED`.
 
 Providers are resilient by default: a 429, 5xx, timeout, or connection failure
 falls through to the next configured cloud key, and the backup becomes sticky for
-the rest of the session. `GET /providers/status` reports presence (never values)
-so a frontend can disable unconfigured providers.
+the rest of the session. `GET /providers/status` reports credential presence, not
+reachability: a local router or Ollama can still be down until a session starts.
 
 Route models per role instead of forcing one model across the room:
 
@@ -200,9 +222,10 @@ event offset instead of replaying duplicates.
 points, and structured market anchors, with a drawer for source health and a
 **Pull fresh intel** button. The FreeBuff-purple **Switchboard** theme is one
 click away from the maroon terminal theme. Provider status badges show which
-keys the bridge discovered, the role drawer routes models per persona, and
-**Export brief** downloads the bracket, Architect slice, and Coroner autopsy as
-one Markdown file.
+credentials the bridge discovered and label keyed providers `CONFIGURED` (not
+live reachability), the role drawer routes models per persona, and **Export
+brief** downloads the bracket, Architect slice, and Coroner autopsy as one
+Markdown file.
 
 Phones and tablets get a dedicated companion at **http://127.0.0.1:8765/m**.
 It keeps the same bridge and SSE contract but replaces the dense war-room grid
@@ -271,6 +294,9 @@ python -m hotseat_core --mode bmad --json-stream "the thing" | jq -r 'select(.ty
 ## Layout
 
 ```
+pyproject.toml    package metadata, hotseat console entry point, bundled assets
+LICENSE           MIT
+CHANGELOG.md      release notes
 hotseat_core/
   config.py       manifest + env resolution, no side effects on import
   personas.py     casts, routing, limits, overrides
@@ -282,10 +308,10 @@ hotseat_core/
   engines/        classic · v2_web · v3_agent · bmad · arena · followup
   runtime.py      orchestration, events, persistence, threaded follow-ups
   cli.py          python -m hotseat_core
-  bridge.py       HTTP/SSE/NDJSON adapter + static console serving
-web/              zero-dependency war room + /m companion shell
+  bridge.py       HTTP/SSE/NDJSON adapter + packaged static console serving
+  web/            zero-dependency war room + /m companion shell
 vault_loader.py   compatibility shim for older imports
-tests/            61 tests, stdlib only
+tests/            62 tests, stdlib only
 docs/             extracted legacy context, decisions, and the unbuilt show concept
 ```
 
@@ -329,8 +355,8 @@ without secret values, persona resolution and overrides, legacy SQLite migration
 JSONL and legacy logs, every engine including `bmad` and `arena`, scout evidence
 injection, ChronoScouts JSON/SQLite ingestion, live fetcher parsing, structured
 market anchors, threaded follow-ups, NDJSON output, HTTP endpoints, static war
-room and `/m` companion routes, token auth, and the loopback-binding guard. CI runs on Python
-3.10–3.12.
+room and `/m` companion routes, token auth, and the loopback-binding guard. CI
+runs on Python 3.10–3.12 and smoke-tests the installed wheel on 3.12.
 
 ## Termux
 

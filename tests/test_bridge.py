@@ -7,7 +7,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from hotseat_core.bridge import Bridge, serve
+from hotseat_core.bridge import Bridge, _redact_token, serve
 from hotseat_core.config import load_config
 from hotseat_core.providers import ProviderClient
 from hotseat_core.runtime import HotseatRuntime
@@ -167,6 +167,13 @@ class BridgeTests(unittest.TestCase):
             server.server_close()
             thread.join(timeout=5)
 
+    def test_verbose_logs_redact_query_tokens(self):
+        message = '"GET /sessions?token=secret&since=2 HTTP/1.1" 200 -'
+        redacted = _redact_token(message)
+        self.assertNotIn("secret", redacted)
+        self.assertIn("token=[REDACTED]", redacted)
+        self.assertIn("since=2", redacted)
+
     def test_mobile_companion_assets_over_http(self):
         server = serve(self.bridge, host="127.0.0.1", port=0)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -183,6 +190,7 @@ class BridgeTests(unittest.TestCase):
                 with urllib.request.urlopen(base + path, timeout=5) as response:
                     self.assertEqual(response.status, 200)
                     self.assertIn(content_type, response.headers.get("Content-Type", ""))
+                    self.assertEqual(response.headers.get("Referrer-Policy"), "no-referrer")
                     body = response.read().decode("utf-8")
                     self.assertIn(first, body)
                     self.assertIn(second, body)

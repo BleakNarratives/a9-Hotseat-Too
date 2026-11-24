@@ -63,6 +63,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--limit", type=int, default=10, help="History limit (default 10).")
     parser.add_argument("--repl", action="store_true", help="Interactive prompt loop.")
     parser.add_argument("--serve", action="store_true", help="Run the HTTP/SSE bridge.")
+    parser.add_argument("--verbose", action="store_true", help="Log bridge requests to stderr (tokens redacted).")
     parser.add_argument("--host", default=None, help="Bridge bind address (default 127.0.0.1).")
     parser.add_argument("--port", type=int, default=None, help="Bridge port (default 8765).")
     parser.add_argument("--token", default=None, help="Bridge bearer token (required off-loopback).")
@@ -292,6 +293,7 @@ def _main(argv: list[str] | None = None) -> int:
                 bridge,
                 host=args.host or config.bridge_host,
                 port=args.port if args.port is not None else config.bridge_port,
+                verbose=args.verbose,
             )
         except (ValueError, OSError) as exc:
             print(f"error: {exc}", file=sys.stderr)
