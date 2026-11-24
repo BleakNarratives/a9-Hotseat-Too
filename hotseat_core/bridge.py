@@ -25,7 +25,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 from . import __version__
 from .config import HotseatConfig, load_config
 from .personas import MODES, get_persona_set, list_modes
-from .providers import available_providers
+from .providers import available_providers, configured_providers
 from .runtime import HotseatRuntime, merge_overrides
 from .scouts_feed import ScoutFeed
 from .storage import SessionStore, StorageError
@@ -130,8 +130,10 @@ class Bridge:
         allowed_origins: tuple[str, ...] = (),
         scout_feed: ScoutFeed | None = None,
         web_dir: str | Path | None = None,
+        secret_loader: Any = None,
     ) -> None:
         self.config = config or load_config()
+        self.secret_loader = secret_loader
         self.store = store or SessionStore(self.config.db_path, self.config.session_log)
         self.runtime = runtime or HotseatRuntime(self.config, store=self.store)
         self.token = token or None
@@ -163,11 +165,23 @@ class Bridge:
         options: Mapping[str, Any] | None = None,
         persona_overrides: Mapping[str, Any] | None = None,
         scout_context: Any = None,
+        role_models: Mapping[str, str] | None = None,
     ) -> SessionJob:
         topic = (topic or "").strip()
         if not topic:
             raise ValueError("A session topic is required.")
         persona_set = self.persona_set(mode, variant, extra_overrides=persona_overrides)
+        if role_models:
+            known = {persona.key for persona in persona_set.personas}
+            unknown = sorted(set(role_models) - known)
+            if unknown:
+                raise ValueError(
+                    "Unknown role model key(s): "
+                    + ", ".join(unknown)
+                    + ". Choose: "
+                    + ", ".join(sorted(known))
+                    + "."
+                )
         job = SessionJob(
             id=uuid.uuid4().hex[:12],
             mode=persona_set.mode,
@@ -223,6 +237,7 @@ class Bridge:
                     sampling=sampling,
                     options=options,
                     persona_overrides=overrides,
+                    role_models=role_models,
                     emit=job.emit,
                     stop_event=job.stop_event,
                     injection=injection,
@@ -385,6 +400,20 @@ class Bridge:
     def providers(self) -> list[dict[str, Any]]:
         return available_providers()
 
+    def provider_status(self) -> dict[str, Any]:
+        """Expose credential presence only; secret values never cross this boundary."""
+
+        rows = configured_providers(self.secret_loader)
+        return {
+            "providers": rows,
+            "configured": [row["name"] for row in rows if row["configured"]],
+            "missing_credentials": [
+                row["name"]
+                for row in rows
+                if row["requires_key"] and not row["configured"]
+            ],
+        }
+
 
 class _Handler(BaseHTTPRequestHandler):
     server_version = "HotseatBridge/" + __version__
@@ -511,6 +540,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(HTTPStatus.OK, {"modes": self.bridge.modes()})
             elif parts == ["providers"]:
                 self._send_json(HTTPStatus.OK, {"providers": self.bridge.providers()})
+            elif parts == ["providers", "status"]:
+                self._send_json(HTTPStatus.OK, self.bridge.provider_status())
             elif parts == ["scouts", "latest"]:
                 self._send_json(
                     HTTPStatus.OK,
@@ -595,6 +626,7 @@ class _Handler(BaseHTTPRequestHandler):
                     options=body.get("options") if isinstance(body.get("options"), Mapping) else None,
                     persona_overrides=body.get("personas") if isinstance(body.get("personas"), Mapping) else None,
                     scout_context=body.get("scout_context"),
+                    role_models=body.get("role_models") if isinstance(body.get("role_models"), Mapping) else None,
                 )
                 self._send_json(
                     HTTPStatus.ACCEPTED,

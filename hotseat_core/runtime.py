@@ -11,15 +11,15 @@ from typing import Any, Callable, Mapping
 from .config import HotseatConfig
 from .engines import Engine, FollowUpEngine, Turn, build_engine, render_transcript
 from .personas import get_persona_set
-from .providers import ProviderClient
+from .providers import ProviderClient, build_client
 from .storage import SessionStore, StorageError
 
 EventEmitter = Callable[[dict[str, Any]], None]
 ClientFactory = Callable[[str, str | None], Any]
 
 
-def _default_client_factory(provider: str, model: str | None) -> ProviderClient:
-    return ProviderClient(provider)
+def _default_client_factory(provider: str, model: str | None) -> Any:
+    return build_client(provider, model)
 
 
 def merge_overrides(
@@ -45,6 +45,7 @@ class SessionResult:
     memory_id: int | None = None
     provider: str = ""
     model: str | None = None
+    fallback_used: bool = False
 
     def public(self) -> dict[str, Any]:
         return {
@@ -55,6 +56,7 @@ class SessionResult:
             "topic": self.topic,
             "provider": self.provider,
             "model": self.model,
+            "fallback_used": self.fallback_used,
             "transcript": self.transcript,
             "turns": [turn.public() for turn in self.turns],
         }
@@ -86,13 +88,36 @@ class HotseatRuntime:
         sampling: Mapping[str, Any] | None = None,
         options: Mapping[str, Any] | None = None,
         persona_overrides: Mapping[str, Any] | None = None,
+        role_models: Mapping[str, str] | None = None,
     ) -> Engine:
         selected_provider = (provider or self.config.provider or "auto").strip().lower()
         selected_model = model or self.config.model
         overrides = merge_overrides(
             self.config.persona_overrides(mode, variant), persona_overrides or {}
         )
+        role_overrides: dict[str, Any] = {}
+        configured_roles = self.config.role_models_for(mode, variant)
+        for key, value in configured_roles.items():
+            if value not in (None, ""):
+                role_overrides[str(key)] = {"model": str(value).strip()}
+        for key, value in (role_models or {}).items():
+            model_name = value.get("model") if isinstance(value, Mapping) else value
+            if model_name not in (None, ""):
+                role_overrides[str(key)] = {"model": str(model_name).strip()}
+        if role_overrides:
+            overrides = merge_overrides(overrides, role_overrides)
         persona_set = get_persona_set(mode, variant, overrides=overrides)
+        if role_overrides:
+            known = {persona.key for persona in persona_set.personas}
+            unknown = sorted(set(role_overrides) - known)
+            if unknown:
+                raise ValueError(
+                    "Unknown role model key(s): "
+                    + ", ".join(unknown)
+                    + ". Choose: "
+                    + ", ".join(sorted(known))
+                    + "."
+                )
         client = self.client_factory(selected_provider, selected_model)
         merged_sampling: dict[str, Any] = {}
         configured_sampling = self.config.provider_options.get("sampling")
@@ -123,6 +148,7 @@ class HotseatRuntime:
         sampling: Mapping[str, Any] | None = None,
         options: Mapping[str, Any] | None = None,
         persona_overrides: Mapping[str, Any] | None = None,
+        role_models: Mapping[str, str] | None = None,
         emit: EventEmitter | None = None,
         stop_event: threading.Event | None = None,
         injection: Callable[[], str | None] | None = None,
@@ -145,6 +171,7 @@ class HotseatRuntime:
             sampling=sampling,
             options=options,
             persona_overrides=persona_overrides,
+            role_models=role_models,
         )
         provider_name = getattr(engine.client, "provider", provider or self.config.provider)
         started = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
@@ -160,6 +187,7 @@ class HotseatRuntime:
                 "topic": topic,
                 "provider": provider_name,
                 "model": engine.model,
+                "role_models": dict(role_models or {}),
                 "personas": [
                     persona.public() for persona in engine.persona_set.personas
                 ],
@@ -185,8 +213,9 @@ class HotseatRuntime:
             turns=turns,
             transcript=transcript,
             session_id=session_id,
-            provider=str(provider_name),
+            provider=str(getattr(engine.client, "provider", provider_name)),
             model=engine.model,
+            fallback_used=bool(getattr(engine.client, "fallback_used", False)),
         )
 
         if save and turns:
@@ -227,6 +256,7 @@ class HotseatRuntime:
                 "topic": topic,
                 "provider": result.provider,
                 "model": result.model,
+                "fallback_used": result.fallback_used,
                 "memory_id": result.memory_id,
                 "turns": [turn.public() for turn in turns],
                 "transcript": transcript,

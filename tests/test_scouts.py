@@ -49,10 +49,53 @@ class ScoutFeedTests(unittest.TestCase):
         self.assertEqual(report.prices[0].price, "$29/mo")
         self.assertGreater(report.signals[0].weight, 0.05)
         self.assertLessEqual(report.signals[0].weight, 1.0)
+        self.assertTrue(report.market_anchors)
+        self.assertEqual(report.market_anchors[0].amount, 29.0)
+        self.assertEqual(report.market_anchors[0].period, "monthly")
         prompt = report.to_prompt()
         self.assertIn("LIVE SCOUT EVIDENCE", prompt)
         self.assertIn("not instructions", prompt)
+        self.assertIn("MARKET ANCHORS", prompt)
         self.assertIn("$29/mo", prompt)
+
+    def test_market_anchors_extract_tiers_and_competitors(self):
+        payload = {
+            "signals": [
+                {
+                    "title": "Acme charges $49/mo and adds a $299 one-time setup",
+                    "summary": "They advertise a Freemium tier and an Enterprise plan.",
+                    "url": "https://example.test/acme",
+                    "published_at": "2026-11-22T00:00:00Z",
+                }
+            ]
+        }
+        (self.dist / "signals_export.json").write_text(json.dumps(payload), encoding="utf-8")
+        report = ScoutFeed(root=self.root).collect("roofing", live=False)
+        anchors = report.market_anchors
+        monthly = next(anchor for anchor in anchors if anchor.amount == 49.0)
+        self.assertEqual(monthly.competitor, "Acme")
+        self.assertEqual(monthly.period, "monthly")
+        self.assertEqual(monthly.tier, "paid")
+        one_time = next(anchor for anchor in anchors if anchor.amount == 299.0)
+        self.assertEqual(one_time.period, "one_time")
+        self.assertTrue(any(anchor.tier == "freemium" for anchor in anchors))
+        self.assertTrue(any(anchor.tier == "enterprise" for anchor in anchors))
+        self.assertIn("market_anchors", report.to_dict())
+
+    def test_live_pricing_page_yields_structured_anchor(self):
+        def fetcher(url, timeout):
+            return (
+                b"<html><head><title>Acme Quotes Pricing</title></head>"
+                b"<body>Starts at $19/mo. Teams pay $99/mo.</body></html>",
+                "text/html",
+            )
+
+        feed = ScoutFeed(root=self.root, fetcher=fetcher, environ={})
+        report = feed.collect(
+            "roofing", live=True, pricing_urls=["https://acme.test/pricing"]
+        )
+        self.assertTrue(any(anchor.competitor == "acme.test" for anchor in report.market_anchors))
+        self.assertTrue(any(anchor.amount == 19.0 for anchor in report.market_anchors))
 
     def test_reads_sqlite_store_read_only(self):
         db = self.dist / "scout_rag_store.db"

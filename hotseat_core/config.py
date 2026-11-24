@@ -32,6 +32,7 @@ class HotseatConfig:
     model: str | None = None
     styles: tuple[str, ...] = ()
     personas: Mapping[str, Any] = field(default_factory=dict)
+    role_models: Mapping[str, Any] = field(default_factory=dict)
     provider_options: Mapping[str, Any] = field(default_factory=dict)
     data_dir: Path = field(default_factory=lambda: DEFAULT_DATA_DIR)
     db_path: Path = field(default_factory=lambda: DEFAULT_DATA_DIR / "memory.db")
@@ -67,6 +68,48 @@ class HotseatConfig:
                 key in known_modes or ":" in key or "." in key for key in self.personas
             ):
                 return self.personas
+        return {}
+
+    def role_models_for(
+        self, mode: str, variant: str | None = None
+    ) -> Mapping[str, str]:
+        """Resolve manifest role-model defaults for a mode/variant.
+
+        Accepted layouts::
+
+            {"role_models": {"producer": "fast-model"}}
+            {"role_models": {"arena": {"producer": "fast-model"}}}
+            {"role_models": {"arena": {"season": {"producer": "fast-model"}}}}
+        """
+
+        data = self.role_models
+        if not isinstance(data, Mapping) or not data:
+            return {}
+        section = data.get(mode)
+        if isinstance(section, Mapping):
+            if variant and isinstance(section.get(variant), Mapping):
+                return {
+                    str(key): str(value)
+                    for key, value in section[variant].items()
+                    if value not in (None, "")
+                }
+            return {
+                str(key): str(value)
+                for key, value in section.items()
+                if isinstance(value, str) and value
+            }
+        for key in (f"{mode}:{variant}" if variant else None, "*", "default"):
+            if not key:
+                continue
+            candidate = data.get(key)
+            if isinstance(candidate, Mapping):
+                return {
+                    str(role): str(model)
+                    for role, model in candidate.items()
+                    if isinstance(model, str) and model
+                }
+        if all(isinstance(value, str) for value in data.values()):
+            return {str(key): str(value) for key, value in data.items() if value}
         return {}
 
 
@@ -192,6 +235,7 @@ def load_config(
         model=str(model) if model else None,
         styles=styles,
         personas=_mapping(core.get("personas", data.get("personas"))),
+        role_models=_mapping(core.get("role_models", data.get("role_models"))),
         provider_options=_mapping(
             core.get("provider_options", data.get("provider_options"))
         ),

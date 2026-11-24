@@ -149,6 +149,28 @@ python3 -m hotseat_core --provider mistral --mode bmad "the thing I want to buil
 `.env` is ignored by Git. Nothing is hardcoded, and no key is read for a provider
 you did not select.
 
+Providers are resilient by default: a 429, 5xx, timeout, or connection failure
+falls through to the next configured cloud key, and the backup becomes sticky for
+the rest of the session. `GET /providers/status` reports presence (never values)
+so a frontend can disable unconfigured providers.
+
+Route models per role instead of forcing one model across the room:
+
+```bash
+python3 -m hotseat_core --mode arena \
+  --role-model producer=fast-model \
+  --role-model critic=fast-model \
+  --role-model foreman=strong-reasoner \
+  --role-model architect=strong-reasoner \
+  --role-model coroner=strong-reasoner \
+  "my idea"
+```
+
+The same map is accepted as `role_models` on `POST /sessions`; `manifest.json`
+persona overrides continue to work for durable defaults, and role defaults can be
+stored as `"role_models": {"arena": {"producer": "fast-model"}}` under
+`hotseat_core`.
+
 | Provider | Notes |
 | :--- | :--- |
 | `auto` | Probe local 9router → first configured cloud key → OpenRouter default |
@@ -174,10 +196,13 @@ brief, Coroner autopsy, and threaded follow-ups against the active session. It
 reads the real time/token/persona event stream over SSE and reconnects with an
 event offset instead of replaying duplicates.
 
-**Scout Wire** runs across the top: live ChronoScouts signals and extracted
-competitor price points, with a drawer for source health and a **Pull fresh
-intel** button. The FreeBuff-purple **Switchboard** theme is one click away from
-the maroon terminal theme.
+**Scout Wire** runs across the top: live ChronoScouts signals, competitor price
+points, and structured market anchors, with a drawer for source health and a
+**Pull fresh intel** button. The FreeBuff-purple **Switchboard** theme is one
+click away from the maroon terminal theme. Provider status badges show which
+keys the bridge discovered, the role drawer routes models per persona, and
+**Export brief** downloads the bracket, Architect slice, and Coroner autopsy as
+one Markdown file.
 
 ## Live ChronoScouts & market intel
 
@@ -200,6 +225,12 @@ temporal-decay weight (`0.5 ** (age_days / half_life)`). Live sources are
 best-effort: a blocked feed is reported in the Scout Wire drawer, never allowed to
 kill the session. `HOTSEAT_SCOUT_RSS` and `HOTSEAT_PRICING_URLS` add defaults.
 
+Signals, SQLite rows, RSS entries, and pricing pages are parsed into a
+`market_anchors` block: competitor, product, amount, currency, `monthly` /
+`yearly` / `one_time` / `custom` period, and `freemium` / `paid` / `enterprise`
+tier. The same structured block is returned by `/scouts/latest` and injected into
+the Producer and Critic prompts.
+
 ## Bring your own frontend
 
 A stdlib HTTP + SSE bridge, no scraping stdout, no Gradio:
@@ -213,7 +244,7 @@ curl -N localhost:8765/sessions/<session_id>/events
 curl -s localhost:8765/scouts/latest
 ```
 
-Modes, personas, providers, history, and scout reports are queryable; personas
+Modes, personas, providers, provider credential status, history, and scout reports are queryable; personas
 are editable for the running process; operator notes can be injected between
 turns; sessions can be stopped or continued with a threaded follow-up. Events:
 `session_start`, `status`, `token_chunk`, `persona_turn`, `operator_message`,
@@ -245,7 +276,7 @@ hotseat_core/
   bridge.py       HTTP/SSE/NDJSON adapter + static console serving
 web/              zero-dependency live terminal-arena console
 vault_loader.py   compatibility shim for older imports
-tests/            48 tests, stdlib only
+tests/            60 tests, stdlib only
 docs/             extracted legacy context, decisions, and the unbuilt show concept
 ```
 
@@ -283,12 +314,14 @@ model's policy — pick a model whose policy fits the job.
 python -m unittest discover -s tests -t . -v
 ```
 
-Covered: manifest/env precedence, nested vault and `.env` resolution, persona
-resolution and overrides, legacy SQLite migration, JSONL and legacy logs, every
-engine including `bmad` and `arena`, scout evidence injection, ChronoScouts
-JSON/SQLite ingestion, live fetcher parsing, threaded follow-ups, NDJSON output,
-HTTP endpoints, static console routes, token auth, and the loopback-binding
-guard. CI runs on Python 3.10–3.12.
+Covered: manifest/env precedence, nested vault and `.env` resolution, per-role
+model routing, 429/timeout fallback routing, provider-status credential presence
+without secret values, persona resolution and overrides, legacy SQLite migration,
+JSONL and legacy logs, every engine including `bmad` and `arena`, scout evidence
+injection, ChronoScouts JSON/SQLite ingestion, live fetcher parsing, structured
+market anchors, threaded follow-ups, NDJSON output, HTTP endpoints, static
+console routes, token auth, and the loopback-binding guard. CI runs on Python
+3.10–3.12.
 
 ## Termux
 
@@ -307,6 +340,8 @@ python -m hotseat_core --provider ollama --mode classic "my idea"
 - [x] Arena: seed vs three rivals, cross-exam, vote-off, brief, autopsy
 - [x] Live retro web console, Scout Wire, threaded follow-ups
 - [x] Live ChronoScouts + market/pricing evidence in arena prompts
+- [x] Per-role model routing + automatic provider fallback
+- [x] Provider status badges, role drawer, Markdown brief export
 - [ ] Full season: eight-character roster, user-built persona, escalation arc
 - [ ] Private and duo sessions, and the cross-remark engine
 - [ ] Optional embedding recall across sessions

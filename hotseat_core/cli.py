@@ -38,6 +38,13 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--variant", default=None, help="Mode variant, e.g. v3 panel|tribunal.")
     parser.add_argument("--provider", default=None, help="auto, ollama, demo, openrouter, ...")
     parser.add_argument("--model", default=None, help="Override the model for every persona.")
+    parser.add_argument(
+        "--role-model",
+        action="append",
+        default=[],
+        metavar="ROLE=MODEL",
+        help="Per-role model override, e.g. producer=fast-model (repeatable).",
+    )
     parser.add_argument("--style", action="append", default=[], help="Style modifier (repeatable).")
     parser.add_argument("--statement", default="", help="v2: the volunteer's opening statement.")
     parser.add_argument("--constraint", action="append", default=[], help="Arena: constraint the rivals must respect (repeatable).")
@@ -81,6 +88,20 @@ def _config_from_args(args: argparse.Namespace) -> HotseatConfig:
 
         changes["db_path"] = Path(args.db).expanduser()
     return dataclasses.replace(config, **changes) if changes else config
+
+
+def _role_models(values: list[str]) -> dict[str, str]:
+    models: dict[str, str] = {}
+    for value in values:
+        if "=" not in value:
+            raise ValueError(f"Role model must be ROLE=MODEL, got {value!r}.")
+        key, model = value.split("=", 1)
+        key = key.strip()
+        model = model.strip()
+        if not key or not model:
+            raise ValueError(f"Role model must be ROLE=MODEL, got {value!r}.")
+        models[key] = model
+    return models
 
 
 def _flatten_styles(values: list[str]) -> tuple[str, ...]:
@@ -178,6 +199,7 @@ def _run_once(args: argparse.Namespace, config: HotseatConfig, topic: str) -> in
             styles=_flatten_styles(args.style),
             system_directive=args.system_directive,
             options=options or None,
+            role_models=_role_models(args.role_model),
             emit=emit,
             save=not args.no_save,
         )

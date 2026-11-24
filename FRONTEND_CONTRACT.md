@@ -1,6 +1,6 @@
 # Hotseat Bridge — Frontend Contract
 
-**Version:** 0.3 · **Transport:** HTTP/1.1 + Server-Sent Events (SSE) + NDJSON
+**Version:** 0.4 · **Transport:** HTTP/1.1 + Server-Sent Events (SSE) + NDJSON
 **Implementation:** [`hotseat_core/bridge.py`](hotseat_core/bridge.py) · **No third-party dependencies**
 
 The bridge lets a CLI, desktop app, or web UI drive a Hotseat session without
@@ -93,6 +93,32 @@ Errors always have the shape:
 }
 ```
 
+### `GET /providers/status`
+
+Credential readiness for every provider. Values are never included; keyed
+providers are `configured` only when a credential resolves from the environment,
+repo `.env`, or the Concierge vault. Local/demo providers need no key and are
+marked configured; reachability is not probed here.
+
+```json
+{
+  "configured": ["openrouter", "demo", "ollama"],
+  "missing_credentials": ["anthropic", "mistral", "cerebras", "groq"],
+  "providers": [
+    {
+      "name": "openrouter",
+      "configured": true,
+      "requires_key": true,
+      "has_credential": true,
+      "credential_names": ["OPENROUTER_API_KEY", "OPENROUTER_KEY"],
+      "local": false,
+      "offline": false,
+      "default_model": "openai/gpt-4o-mini"
+    }
+  ]
+}
+```
+
 ### `GET /personas?mode=classic&variant=&system=1`
 
 `system=1` includes each persona's full system prompt (needed for an editor UI).
@@ -147,6 +173,9 @@ process, or `null` if no sweep has run.
     "sources": ["chronoscouts:/home/me/ChronoScouts", "hn", "pricing:acme.test"],
     "errors": [],
     "counts": { "signals": 8, "prices": 3 },
+    "market_anchors": [
+      { "competitor": "acme.test", "product": "Acme Pricing", "price": "$29/mo", "amount": 29.0, "currency": "USD", "period": "monthly", "tier": "paid", "source": "pricing" }
+    ],
     "signals": [
       { "source": "hn", "title": "…", "detail": "…", "url": "…", "published_at": "…", "kind": "pain", "weight": 0.87 }
     ],
@@ -219,12 +248,15 @@ Starts a session in a background thread. Returns immediately.
     "constraints": "arena only: budget $0, one weekend"
   },
   "personas": { "fixer": { "model": "tinyllama:latest" } },
+  "role_models": { "producer": "fast-model", "coroner": "reasoning-model" },
   "scout_context": { "live": true, "urls": [], "pricing_urls": [] }
 }
 ```
 
 Only `mode` and `topic` are required. `mode` is `classic`, `v2`, `v3`, `bmad`, or
-`arena`.
+`arena`. `role_models` maps persona keys to models for this session and overrides
+manifest persona models; unknown keys are rejected by the runtime. Retryable
+provider failures fall through to the next configured cloud key automatically.
 
 `scout_context` is optional:
 
@@ -268,6 +300,7 @@ Polling fallback for clients without SSE. `since` is an event index.
     "topic": "hire or contract?",
     "provider": "demo",
     "model": null,
+    "fallback_used": false,
     "transcript": "# The Hot Seat\n…",
     "turns": [
       { "persona": "fixer", "speaker": "The Fixer", "content": "1. …", "round": 5, "model": "llama3.2:1b" }
@@ -339,7 +372,7 @@ Every event has `type`. All events except `token_chunk` are also retrievable fro
 
 | `type` | Payload |
 | :--- | :--- |
-| `session_start` | `session_id`, `timestamp`, `mode`, `variant`, `label`, `topic`, `provider`, `model`, `personas[]` (public persona objects) |
+| `session_start` | `session_id`, `timestamp`, `mode`, `variant`, `label`, `topic`, `provider`, `model`, `role_models`, `personas[]` (public persona objects) |
 | `status` | `message`, `persona`, `round` — UI spinners and “who is thinking” |
 | `token_chunk` | `persona`, `text` — real streaming for OpenAI-compatible and Ollama; Anthropic sends one chunk |
 | `persona_turn` | `persona`, `speaker`, `content`, `round`, `model` — completed turn |
@@ -347,7 +380,7 @@ Every event has `type`. All events except `token_chunk` are also retrievable fro
 | `error` | `session_id`, `message` — the session then ends; turns already produced are kept |
 | `operator_message` | `session_id`, `timestamp`, `message` — a threaded follow-up was accepted |
 | `iteration_start` | `session_id`, `timestamp`, `iteration`, `parent_turns` — follow-up pass begins |
-| `session_end` | `session_id`, `timestamp`, `mode`, `variant`, `topic`, `provider`, `model`, `memory_id`, `turns[]`, `transcript`, `stopped`; follow-ups add `follow_up` and `iteration` |
+| `session_end` | `session_id`, `timestamp`, `mode`, `variant`, `topic`, `provider`, `model`, `fallback_used`, `memory_id`, `turns[]`, `transcript`, `stopped`; follow-ups add `follow_up` and `iteration` |
 
 `turns[]` entries are the same object as `persona_turn` without `type`.
 

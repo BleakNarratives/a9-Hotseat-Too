@@ -83,6 +83,27 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.persona_overrides("v3", "tribunal")["fixer"]["model"], "small")
         self.assertEqual(config.persona_overrides("classic")["audrey"]["model"], "classic-model")
 
+    def test_role_model_override_layouts(self):
+        (self.root / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "hotseat_core": {
+                        "role_models": {
+                            "arena": {"producer": "fast", "coroner": "deep"},
+                            "classic": {"audrey": "classic-fast"},
+                            "v3": {"tribunal": {"fixer": "tribunal-deep"}},
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        config = load_config(root=self.root, env={})
+        self.assertEqual(config.role_models_for("arena"), {"producer": "fast", "coroner": "deep"})
+        self.assertEqual(config.role_models_for("arena", "season")["producer"], "fast")
+        self.assertEqual(config.role_models_for("classic")["audrey"], "classic-fast")
+        self.assertEqual(config.role_models_for("v3", "tribunal")["fixer"], "tribunal-deep")
+
     def test_invalid_manifest_raises(self):
         (self.root / "manifest.json").write_text("{not json", encoding="utf-8")
         with self.assertRaises(ValueError):

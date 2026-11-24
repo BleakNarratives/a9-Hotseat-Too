@@ -12,6 +12,14 @@
     source: null,
     mode: "arena",
     scout: null,
+    sessionScout: null,
+    providerStatus: [],
+    roles: [],
+    contenders: [],
+    panels: {},
+    topic: "",
+    provider: "",
+    constraints: "",
     names: {},
     streams: new Map(),
     turns: [],
@@ -105,22 +113,34 @@
       option.value = entry.value;
       option.textContent = entry.label;
       if (entry.title) option.title = entry.title;
+      if (entry.disabled) option.disabled = true;
+      if (entry.configured !== undefined) option.dataset.configured = entry.configured ? "1" : "0";
       select.appendChild(option);
     });
-    if (preferred && entries.some((entry) => entry.value === preferred)) {
-      select.value = preferred;
-    }
+    const target =
+      entries.find((entry) => entry.value === preferred && !entry.disabled) ||
+      entries.find((entry) => !entry.disabled);
+    if (target) select.value = target.value;
   }
 
   async function loadMetadata() {
     let modes = [];
     let providers = [];
+    let statusRows = [];
     try {
       const [modeData, providerData] = await Promise.all([api("/modes"), api("/providers")]);
       modes = modeData.modes || [];
       providers = providerData.providers || [];
     } catch (error) {
       showError("Could not load bridge metadata: " + error.message);
+    }
+    try {
+      const statusData = await api("/providers/status");
+      statusRows = statusData.providers || [];
+      state.providerStatus = statusRows;
+      renderProviderStatus(statusRows);
+    } catch (error) {
+      state.providerStatus = [];
     }
 
     if (!modes.length) {
@@ -143,32 +163,131 @@
     );
     if (!$("#mode-select").value) $("#mode-select").value = "arena";
 
+    const statusMap = new Map(statusRows.map((item) => [item.name, item]));
+    const fallbackProviders = [
+      { name: "openrouter", requires_key: true },
+      { name: "mistral", requires_key: true },
+      { name: "anthropic", requires_key: true },
+      { name: "cerebras", requires_key: true },
+      { name: "groq", requires_key: true },
+      { name: "9router", requires_key: false },
+      { name: "demo", requires_key: false },
+    ];
     const providerEntries = [
-      { value: "auto", label: "AUTO // SERVER CONFIG", title: "Use the server's configured provider (auto probes 9router, then cloud keys)." },
+      { value: "auto", label: "AUTO // SERVER CONFIG", title: "Use the server's configured provider (auto probes 9router, then cloud keys).", configured: true },
     ].concat(
-      (providers.length ? providers : [
-        { name: "openrouter", requires_key: true },
-        { name: "mistral", requires_key: true },
-        { name: "anthropic", requires_key: true },
-        { name: "cerebras", requires_key: true },
-        { name: "groq", requires_key: true },
-        { name: "9router", requires_key: false },
-        { name: "demo", requires_key: false },
-      ]).map((item) => ({
-        value: item.name,
-        label: item.name.toUpperCase() + (item.offline ? " // OFFLINE" : item.requires_key ? " // KEY" : ""),
-        title: item.requires_key ? "Credential resolved from env, .env, or the Concierge vault." : "",
-      }))
+      (providers.length ? providers : statusRows.length ? statusRows : fallbackProviders).map((item) => {
+        const status = statusMap.get(item.name);
+        const configured = status ? status.configured : true;
+        const missing = item.requires_key && !configured;
+        return {
+          value: item.name,
+          label:
+            item.name.toUpperCase() +
+            (item.offline ? " // OFFLINE" : item.requires_key ? (missing ? " // NO KEY" : " // READY") : " // LOCAL"),
+          title: missing
+            ? "No credential found in env, repo .env, or ~/.concierge/vault.json."
+            : item.requires_key
+              ? "Credential found. Retryable failures will fall back to other configured providers."
+              : "No key required; reachability is checked when a session starts.",
+          configured,
+          disabled: missing,
+        };
+      })
     );
     fillSelect($("#provider-select"), providerEntries, "auto");
     updateProviderHint();
   }
 
+  function renderProviderStatus(rows) {
+    const box = $("#provider-badges");
+    clear(box);
+    rows.forEach((row) => {
+      const badge = el("span", "provider-badge", row.name.toUpperCase());
+      badge.dataset.state = row.configured ? "ready" : "missing";
+      badge.title = row.configured
+        ? row.requires_key
+          ? "Credential discovered (" + (row.credential_names || []).join(" / ") + ")"
+          : "No credential required"
+        : "No credential found for " + (row.credential_names || []).join(" / ");
+      box.appendChild(badge);
+    });
+    if (!rows.length) box.appendChild(el("span", "hint", "status unavailable"));
+  }
+
   function updateProviderHint() {
     const select = $("#provider-select");
     const selected = select.options[select.selectedIndex];
-    $("#provider-hint").textContent =
-      (selected && selected.title) || "Credentials resolve automatically from env, .env, or vault.";
+    if (!selected) return;
+    let hint = selected.title || "Credentials resolve automatically from env, .env, or vault.";
+    if (selected.value !== "auto" && selected.dataset.configured === "0") {
+      hint = "No credential discovered. Add it to .env or ~/.concierge/vault.json, then restart the bridge.";
+    }
+    $("#provider-hint").textContent = hint;
+  }
+
+  // ── role model routing ──────────────────────────────────────────────────────
+  async function loadRoleModels() {
+    const mode = $("#mode-select").value || "arena";
+    const box = $("#roles-list");
+    try {
+      const data = await api("/personas?mode=" + encodeURIComponent(mode));
+      state.roles = Array.isArray(data.personas) ? data.personas : [];
+    } catch (error) {
+      state.roles = [];
+    }
+    renderRoleDrawer();
+  }
+
+  function renderRoleDrawer() {
+    const box = $("#roles-list");
+    clear(box);
+    if (!state.roles.length) {
+      box.appendChild(el("p", "muted", "No roles loaded."));
+      return;
+    }
+    state.roles.forEach((role) => {
+      const label = el("label", "role-row");
+      const heading = el("span", "role-label");
+      heading.appendChild(el("strong", "", role.name || role.key));
+      heading.appendChild(el("span", "", role.key));
+      label.appendChild(heading);
+      const input = document.createElement("input");
+      input.type = "text";
+      input.dataset.role = role.key;
+      input.dataset.defaultModel = role.model || "";
+      input.value = role.model || "";
+      input.placeholder = "default model";
+      input.autocomplete = "off";
+      input.spellcheck = false;
+      label.appendChild(input);
+      box.appendChild(label);
+    });
+  }
+
+  function roleModels() {
+    const values = {};
+    document.querySelectorAll("#roles-list input[data-role]").forEach((input) => {
+      const value = input.value.trim();
+      if (value && value !== input.dataset.defaultModel) values[input.dataset.role] = value;
+    });
+    return Object.keys(values).length ? values : undefined;
+  }
+
+  function setupRoles() {
+    const toggle = $("#roles-toggle");
+    toggle.addEventListener("click", () => {
+      const drawer = $("#roles-drawer");
+      const open = drawer.hidden;
+      drawer.hidden = !open;
+      toggle.setAttribute("aria-expanded", open ? "true" : "false");
+      if (open && !state.roles.length) loadRoleModels();
+    });
+    $("#roles-clear").addEventListener("click", () => {
+      document.querySelectorAll("#roles-list input[data-role]").forEach((input) => {
+        input.value = "";
+      });
+    });
   }
 
   // ── scout wire ─────────────────────────────────────────────────────────────
@@ -278,6 +397,28 @@
       signalBox.appendChild(row);
     });
 
+    const anchors = Array.isArray(report.market_anchors) ? report.market_anchors : [];
+    const anchorBox = $("#scout-anchors");
+    clear(anchorBox);
+    if (!anchors.length) anchorBox.appendChild(el("p", "muted", "No structured anchors in the last sweep."));
+    anchors.slice(0, 16).forEach((anchor) => {
+      const row = el("div", "scout-row");
+      row.appendChild(el("span", "", String(anchor.competitor || "market") + " — " + String(anchor.price || "—")));
+      row.appendChild(
+        el(
+          "span",
+          "meta",
+          String(anchor.tier || "unknown") +
+            " // " +
+            String(anchor.period || "unknown") +
+            " // " +
+            String(anchor.product || "") +
+            (anchor.source ? " // " + String(anchor.source) : "")
+        )
+      );
+      anchorBox.appendChild(row);
+    });
+
     const priceBox = $("#scout-prices");
     clear(priceBox);
     if (!prices.length) priceBox.appendChild(el("p", "muted", "No competitor pricing found in the last sweep."));
@@ -356,7 +497,11 @@
   // ── stage rendering ────────────────────────────────────────────────────────
   function resetStage() {
     state.turns = [];
+    state.sessionScout = null;
+    state.contenders = [];
+    state.panels = {};
     state.streams.clear();
+    $("#export-button").disabled = true;
     const turns = $("#turns");
     clear(turns);
     turns.appendChild(el("p", "muted", "Session opening. The room is taking its seats."));
@@ -392,6 +537,7 @@
   }
 
   function setPanel(selector, text) {
+    state.panels[selector] = String(text || "");
     const node = $(selector);
     clear(node);
     const paragraphs = String(text || "").split(/\n{2,}/).filter((part) => part.trim());
@@ -422,6 +568,9 @@
 
   function renderContenders(text) {
     const parsed = parseContenders(text);
+    state.contenders = parsed.length
+      ? parsed
+      : [{ number: "00", name: "THE FOUR CONTENDERS", body: String(text || "") }];
     const bracket = $("#bracket");
     clear(bracket);
     if (!parsed.length) {
@@ -520,6 +669,120 @@
     $("#turns").scrollTop = $("#turns").scrollHeight;
   }
 
+  // ── export ─────────────────────────────────────────────────────────────────
+  function lastTurn(persona) {
+    const turns = state.turns.filter((turn) => String(turn.persona || "") === persona);
+    return turns.length ? String(turns[turns.length - 1].content || "") : "";
+  }
+
+  function panelText(selector, persona) {
+    return state.panels[selector] || lastTurn(persona) || "";
+  }
+
+  function exportMarkdown() {
+    if (!state.done || !state.turns.length) return;
+    const headline = state.mode === "arena" ? "THE HOT SEAT — ARENA BRIEF" : "THE HOT SEAT — SESSION BRIEF";
+    const lines = [
+      "# " + headline,
+      "",
+      "**Generated:** " + new Date().toISOString(),
+      "**Session:** " + (state.sessionId || "unsaved"),
+      "**Mode:** " + state.mode,
+      "**Provider:** " + (state.provider || "server config"),
+      "**Topic:** " + (state.topic || "untitled"),
+    ];
+    if (state.constraints) lines.push("**Constraints:** " + state.constraints);
+    lines.push("");
+
+    const scoutReport = state.sessionScout || state.scout || {};
+    const anchors = scoutReport.market_anchors || [];
+    const prices = scoutReport.prices || [];
+    if (anchors.length || prices.length) {
+      lines.push("## Market Anchors", "");
+      anchors.slice(0, 16).forEach((anchor) => {
+        lines.push(
+          "- **" +
+            String(anchor.competitor || "market") +
+            "** — " +
+            String(anchor.tier || "unknown") +
+            " / " +
+            String(anchor.period || "unknown") +
+            " — " +
+            String(anchor.price || "—") +
+            (anchor.product ? " (" + String(anchor.product) + ")" : "")
+        );
+      });
+      if (!anchors.length) {
+        prices.slice(0, 8).forEach((price) => {
+          lines.push("- **" + String(price.competitor || "market") + "** — " + String(price.price || "—"));
+        });
+      }
+      lines.push("");
+    }
+
+    if (state.contenders.length) {
+      lines.push("## The Bracket", "");
+      state.contenders.forEach((contender) => {
+        lines.push("### CONTENDER " + String(contender.number || "00") + " — " + String(contender.name || "UNNAMED"));
+        lines.push("", String(contender.body || "").trim(), "");
+      });
+    }
+
+    const sections = [
+      ["## Cross-Examination", "#critic-body", "critic"],
+      ["## The Foreman's Call", "#foreman-body", "foreman"],
+      ["## Architect — Vertical Slice", "#architect-body", "architect"],
+      ["## Coroner — Autopsy", "#coroner-body", "coroner"],
+    ];
+    sections.forEach(([title, selector, persona]) => {
+      const text = panelText(selector, persona);
+      if (text) lines.push(title, "", String(text).trim(), "");
+    });
+
+    const included = new Set(["producer", "critic", "foreman", "architect", "coroner"]);
+    const rest = state.turns.filter((turn) => !included.has(String(turn.persona || "")));
+    if (rest.length) {
+      lines.push("## Floor Transcript", "");
+      rest.forEach((turn) => {
+        lines.push("### " + String(turn.speaker || turn.persona || "Speaker"), "", String(turn.content || "").trim(), "");
+      });
+    }
+    if (!state.contenders.length && !rest.length) {
+      lines.push("## Floor Transcript", "");
+      state.turns.forEach((turn) => {
+        lines.push("### " + String(turn.speaker || turn.persona || "Speaker"), "", String(turn.content || "").trim(), "");
+      });
+    }
+
+    const blob = new Blob([lines.join("\n").trim() + "\n"], { type: "text/markdown;charset=utf-8" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = "hotseat-" + (state.mode || "arena") + "-" + (state.sessionId || "brief") + ".md";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    const button = $("#export-button");
+    const original = button.textContent;
+    button.textContent = "EXPORTED";
+    window.setTimeout(() => {
+      button.textContent = original;
+    }, 1400);
+  }
+
+  async function syncSessionScouts() {
+    if (!state.sessionId) return;
+    try {
+      const documentData = await api("/sessions/" + state.sessionId);
+      if (documentData.scouts) {
+        state.sessionScout = documentData.scouts;
+        renderScout(documentData.scouts);
+      }
+    } catch (error) {
+      /* the last global report remains usable */
+    }
+  }
+
   // ── session flow ───────────────────────────────────────────────────────────
   async function launch() {
     const topic = $("#seed-input").value.trim();
@@ -542,11 +805,16 @@
     $("#stage-title").textContent = ($("#mode-select").selectedOptions[0]?.textContent || state.mode) + " // FLOOR";
 
     const constraints = $("#constraint-input").value.trim();
+    const provider = $("#provider-select").value;
+    state.topic = topic;
+    state.provider = provider === "auto" ? "server config" : provider;
+    state.constraints = constraints;
     const body = {
       mode: state.mode,
-      provider: $("#provider-select").value === "auto" ? undefined : $("#provider-select").value,
+      provider: provider === "auto" ? undefined : provider,
       topic,
       options: constraints ? { constraints } : undefined,
+      role_models: roleModels(),
       scout_context: $("#attach-scouts").checked ? { live: true } : undefined,
     };
 
@@ -664,13 +932,16 @@
       state.active = false;
       state.done = true;
       closeSource();
-      $("#turns").innerHTML = "";
+      state.turns = [];
+      clear($("#turns"));
       (data.turns || []).forEach((turn) => addTurn(turn));
       if (!(data.turns || []).length) $("#turns").appendChild(el("p", "muted", "Session ended without turns."));
+      $("#export-button").disabled = !state.turns.length;
       $("#followup-input").disabled = false;
       $("#followup-button").disabled = false;
       setLiveFlag(false);
-      setStatus("VERDICT IN", "done");
+      setStatus(data.fallback_used ? "VERDICT IN // FALLBACK" : "VERDICT IN", "done");
+      syncSessionScouts();
       if (data.memory_id) {
         $("#session-line").textContent =
           "SESSION // " + state.sessionId + " // MEMORY #" + String(data.memory_id);
@@ -694,6 +965,7 @@
       input.value = "";
       state.active = true;
       state.done = false;
+      $("#export-button").disabled = true;
       showError("");
       setStatus("REVISION", "live");
       connect(state.eventCount);
@@ -714,9 +986,19 @@
       button.title = "This browser has no Web Speech API. Type the seed instead.";
       return;
     }
+    if (!window.isSecureContext && !["localhost", "127.0.0.1"].includes(window.location.hostname)) {
+      button.disabled = true;
+      status.textContent = "HTTPS required — type instead";
+      button.title = "The microphone needs HTTPS or localhost. Type the seed instead.";
+      return;
+    }
     let recognition = null;
     let base = "";
     button.addEventListener("click", () => {
+      if (navigator.onLine === false) {
+        status.textContent = "offline — type instead";
+        return;
+      }
       if (recognition) {
         recognition.stop();
         return;
@@ -741,7 +1023,14 @@
         status.textContent = "listening…";
       };
       recognition.onerror = (event) => {
-        status.textContent = event.error === "not-allowed" ? "mic blocked" : "mic error";
+        const messages = {
+          "not-allowed": "mic blocked — type instead",
+          "service-not-allowed": "mic blocked — type instead",
+          "no-speech": "no speech — try again or type",
+          "audio-capture": "no microphone — type instead",
+          network: "offline — type instead",
+        };
+        status.textContent = messages[event.error] || "mic error — type instead";
       };
       recognition.onend = () => {
         button.setAttribute("aria-pressed", "false");
@@ -799,8 +1088,10 @@
     setupTheme();
     setupDrawer();
     setupMicrophone();
+    setupRoles();
     $("#scout-refresh").addEventListener("click", refreshScouts);
     $("#launch-button").addEventListener("click", launch);
+    $("#export-button").addEventListener("click", exportMarkdown);
     $("#provider-select").addEventListener("change", updateProviderHint);
     $("#mode-select").addEventListener("change", () => {
       if (state.active) return;
@@ -808,13 +1099,17 @@
       document.body.dataset.mode = state.mode;
       $("#stage-title").textContent =
         ($("#mode-select").selectedOptions[0]?.textContent || state.mode) + " // FLOOR";
+      loadRoleModels();
     });
     document.body.dataset.mode = state.mode;
     $("#followup-form").addEventListener("submit", followUp);
     $("#seed-input").addEventListener("keydown", (event) => {
       if ((event.metaKey || event.ctrlKey) && event.key === "Enter") launch();
     });
-    loadMetadata().then(loadScouts);
+    loadMetadata().then(() => {
+      loadRoleModels();
+      loadScouts();
+    });
   }
 
   document.addEventListener("DOMContentLoaded", init);

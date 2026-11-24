@@ -57,6 +57,8 @@
         <div>
           <h3>COMPETITOR PRICING</h3>
           <div id="scout-prices" class="drawer-list"><p class="muted">Nothing collected yet.</p></div>
+          <h3 class="drawer-sub">MARKET ANCHORS</h3>
+          <div id="scout-anchors" class="drawer-list"><p class="muted">No structured anchors yet.</p></div>
           <h3 class="drawer-sub">SOURCE HEALTH</h3>
           <div id="scout-health" class="drawer-list"><p class="muted">No sweep has run.</p></div>
         </div>
@@ -77,6 +79,16 @@
         <select id="provider-select"></select>
         <span class="hint" id="provider-hint">auto resolves local or configured credentials</span>
       </label>
+      <div class="provider-badges" id="provider-badges" aria-live="polite" aria-label="Provider credential status"></div>
+      <button class="btn ghost roles-toggle" id="roles-toggle" type="button" aria-expanded="false" aria-controls="roles-drawer">ROLE MODEL ROUTING</button>
+      <div class="roles-drawer" id="roles-drawer" hidden>
+        <div class="roles-head">
+          <span>PER-ROLE MODELS</span>
+          <button class="link-button" id="roles-clear" type="button">CLEAR</button>
+        </div>
+        <div id="roles-list"><p class="muted">Load a mode to assign models.</p></div>
+        <p class="hint">Blank uses the persona default. Cheap/fast for Producer + Critic; stronger reasoning for Foreman, Architect, Coroner.</p>
+      </div>
       <label class="field">
         <span class="field-label">THE SEED</span>
         <textarea id="seed-input" rows="5" placeholder="Pitch the idea, decision, or beautiful mess. Be specific. The room will not be."></textarea>
@@ -104,7 +116,10 @@
     <section class="stage" aria-label="Arena floor">
       <div class="stage-head">
         <div><span class="index">02</span><h2 id="stage-title">ARENA FLOOR</h2></div>
-        <span class="stage-status" id="stage-status">IDLE</span>
+        <div class="stage-head-right">
+          <span class="stage-status" id="stage-status">IDLE</span>
+          <button class="btn export" id="export-button" type="button" disabled>EXPORT BRIEF</button>
+        </div>
       </div>
 
       <div class="bracket" id="bracket">

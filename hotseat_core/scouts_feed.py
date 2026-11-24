@@ -101,6 +101,145 @@ def _as_text(value: Any, limit: int = 400) -> str:
     return text[:limit]
 
 
+_PRICE_PATTERN = re.compile(
+    r"(?P<currency>US\$|\$|€|£)\s?(?P<amount>\d[\d,]*(?:\.\d{1,2})?)"
+    r"(?:\s?(?P<period>/|per\s+)?\s?(?P<unit>mo|month|monthly|yr|year|annually|user|seat|one[- ]?time|once))?",
+    re.I,
+)
+_TIER_PATTERN = re.compile(
+    r"\b(freemium|free tier|free plan|enterprise(?: tier)?|custom pricing|contact sales)\b",
+    re.I,
+)
+
+
+def _number(value: Any) -> float | None:
+    try:
+        return float(str(value).replace(",", "").strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _period(unit: str | None, context: str) -> str:
+    normalized = re.sub(r"[^a-z]+", "_", (unit or "").lower()).strip("_")
+    if normalized in {"mo", "month", "monthly"}:
+        return "monthly"
+    if normalized in {"yr", "year", "annually"}:
+        return "yearly"
+    if normalized in {"user", "seat"}:
+        return "per_seat"
+    if normalized in {"one_time", "once"} or "one-time" in normalized:
+        return "one_time"
+    low = context.lower()
+    if "one-time" in low or "one time" in low:
+        return "one_time"
+    if "per month" in low or "/mo" in low or "monthly" in low:
+        return "monthly"
+    if "per year" in low or "/yr" in low or "annual" in low:
+        return "yearly"
+    return "unknown"
+
+
+def _tier(amount: float | None, context: str) -> str:
+    low = context.lower()
+    if any(word in low for word in ("enterprise", "custom pricing", "contact sales")):
+        return "enterprise"
+    if any(word in low for word in ("freemium", "free tier", "free plan")):
+        return "freemium"
+    if amount == 0:
+        return "freemium"
+    if amount is not None:
+        return "paid"
+    return "unknown"
+
+
+def _extract_competitor(text: str, fallback: str) -> str:
+    for pattern in (
+        r"\b([A-Z][A-Za-z0-9&.'-]{1,40})\s+(?:charges|costs|prices|starts at|plans?|pricing)\b",
+        r"\b(?:competitor|vendor)\s*[:\-]\s*([A-Z][A-Za-z0-9&.' -]{1,40})",
+    ):
+        match = re.search(pattern, text)
+        if match:
+            name = match.group(1).strip(" .,:;")
+            if name.lower() not in {"the", "this", "starts", "pricing", "plans"}:
+                return name
+    return fallback
+
+
+def _anchor_from_match(
+    match: re.Match[str],
+    *,
+    competitor: str,
+    product: str,
+    url: str,
+    observed_at: str | None,
+    weight: float,
+    source: str,
+) -> "MarketAnchor":
+    currency = {"$": "USD", "US$": "USD", "€": "EUR", "£": "GBP"}.get(
+        match.group("currency").upper(), match.group("currency")
+    )
+    amount = _number(match.group("amount"))
+    period = _period(match.group("unit"), match.group(0))
+    context = match.group(0)
+    return MarketAnchor(
+        competitor=competitor,
+        product=product,
+        price=match.group(0).strip(),
+        amount=amount,
+        currency=currency,
+        period=period,
+        tier=_tier(amount, context),
+        url=url,
+        observed_at=observed_at,
+        weight=weight,
+        source=source,
+    )
+
+
+def _anchors_from_text(
+    text: str,
+    *,
+    competitor: str,
+    product: str,
+    url: str = "",
+    observed_at: str | None = None,
+    weight: float = 0.6,
+    source: str = "signal",
+) -> list["MarketAnchor"]:
+    if not text:
+        return []
+    anchors = [
+        _anchor_from_match(
+            match,
+            competitor=competitor,
+            product=product,
+            url=url,
+            observed_at=observed_at,
+            weight=weight,
+            source=source,
+        )
+        for match in _PRICE_PATTERN.finditer(text)
+    ]
+    for match in _TIER_PATTERN.finditer(text):
+        tier = _tier(None, match.group(0))
+        anchors.append(
+            MarketAnchor(
+                competitor=competitor,
+                product=product,
+                price=match.group(1),
+                amount=None,
+                currency=None,
+                period="custom" if tier == "enterprise" else "free",
+                tier=tier,
+                url=url,
+                observed_at=observed_at,
+                weight=weight,
+                source=source,
+            )
+        )
+    return anchors
+
+
 @dataclass
 class ScoutSignal:
     source: str
@@ -147,10 +286,43 @@ class PricePoint:
 
 
 @dataclass
+class MarketAnchor:
+    """Structured pricing evidence extracted from a signal or pricing page."""
+
+    competitor: str
+    product: str
+    price: str
+    amount: float | None = None
+    currency: str | None = None
+    period: str = "unknown"
+    tier: str = "unknown"
+    url: str = ""
+    observed_at: str | None = None
+    weight: float = 0.6
+    source: str = "signal"
+
+    def public(self) -> dict[str, Any]:
+        return {
+            "competitor": self.competitor,
+            "product": self.product,
+            "price": self.price,
+            "amount": self.amount,
+            "currency": self.currency,
+            "period": self.period,
+            "tier": self.tier,
+            "url": self.url,
+            "observed_at": self.observed_at,
+            "weight": self.weight,
+            "source": self.source,
+        }
+
+
+@dataclass
 class ScoutReport:
     generated_at: str
     signals: list[ScoutSignal] = field(default_factory=list)
     prices: list[PricePoint] = field(default_factory=list)
+    market_anchors: list[MarketAnchor] = field(default_factory=list)
     sources: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     root: str | None = None
@@ -162,12 +334,13 @@ class ScoutReport:
             "sources": self.sources,
             "errors": self.errors,
             "counts": {"signals": len(self.signals), "prices": len(self.prices)},
+            "market_anchors": [anchor.public() for anchor in self.market_anchors],
             "signals": [signal.public() for signal in self.signals],
             "prices": [price.public() for price in self.prices],
         }
 
     def to_prompt(self, limit: int = 2600) -> str:
-        if not self.signals and not self.prices:
+        if not self.signals and not self.prices and not self.market_anchors:
             return ""
         lines = [
             f"LIVE SCOUT EVIDENCE (generated {self.generated_at}; "
@@ -181,6 +354,17 @@ class ScoutReport:
             if signal.url:
                 entry += f" ({signal.url})"
             lines.append(entry)
+        if self.market_anchors:
+            lines.append("MARKET ANCHORS (structured pricing):")
+            for anchor in self.market_anchors[:16]:
+                stamp = anchor.observed_at or "undated"
+                line = (
+                    f"- {anchor.competitor} | {anchor.tier} | {anchor.period} | "
+                    f"{anchor.price} | {anchor.product} | {stamp}"
+                )
+                if anchor.url:
+                    line += f" ({anchor.url})"
+                lines.append(line)
         for price in self.prices[:12]:
             stamp = price.observed_at or "undated"
             lines.append(
@@ -483,6 +667,18 @@ class ScoutFeed:
             if len(unique) >= 4:
                 break
         host = urlparse(url).netloc
+        plain = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html)).strip()
+        report.market_anchors.extend(
+            _anchors_from_text(
+                plain,
+                competitor=host,
+                product=title or "pricing page",
+                url=url,
+                observed_at=_iso(),
+                weight=1.0,
+                source="pricing",
+            )
+        )
         if unique:
             for price in unique:
                 report.prices.append(
@@ -512,6 +708,50 @@ class ScoutFeed:
         for price in report.prices:
             price_map[(price.competitor.lower(), price.product.lower(), price.price)] = price
         report.prices = sorted(price_map.values(), key=lambda item: item.weight, reverse=True)[:limit]
+
+        anchors = list(report.market_anchors)
+        for price in report.prices:
+            anchors.extend(
+                _anchors_from_text(
+                    price.price,
+                    competitor=price.competitor,
+                    product=price.product,
+                    url=price.url,
+                    observed_at=price.observed_at,
+                    weight=price.weight,
+                    source="price",
+                )
+            )
+        for signal in report.signals:
+            text = f"{signal.title}. {signal.detail}".strip()
+            competitor = _extract_competitor(text, signal.source)
+            anchors.extend(
+                _anchors_from_text(
+                    text,
+                    competitor=competitor,
+                    product=signal.title,
+                    url=signal.url,
+                    observed_at=signal.published_at,
+                    weight=signal.weight,
+                    source="signal",
+                )
+            )
+
+        anchor_map: dict[tuple[Any, ...], MarketAnchor] = {}
+        for anchor in anchors:
+            key = (
+                anchor.competitor.lower(),
+                anchor.product.lower(),
+                anchor.amount,
+                anchor.period,
+                anchor.tier,
+            )
+            existing = anchor_map.get(key)
+            if existing is None or anchor.weight > existing.weight:
+                anchor_map[key] = anchor
+        report.market_anchors = sorted(
+            anchor_map.values(), key=lambda item: item.weight, reverse=True
+        )[:limit]
 
         report.sources = list(dict.fromkeys(report.sources))
         report.errors = list(dict.fromkeys(report.errors))[:12]

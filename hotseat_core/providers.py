@@ -22,7 +22,27 @@ from urllib.request import Request, urlopen
 
 
 class ProviderError(RuntimeError):
-    """A concise, user-safe provider selection or request failure."""
+    """A concise, user-safe provider selection or request failure.
+
+    ``retryable`` marks failures another provider might survive: rate limits,
+    server errors, timeouts, and connection failures. Bad credentials, malformed
+    requests, and invalid responses stay fatal so fallback cannot hide them.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        retryable: bool | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        if retryable is None:
+            retryable = status_code == 429 or (
+                isinstance(status_code, int) and status_code >= 500
+            )
+        self.retryable = bool(retryable)
 
 
 @dataclass(frozen=True)
@@ -218,6 +238,123 @@ def _configured_cloud_provider(
             if key:
                 return name, key
     return None
+
+
+def _configured_cloud_names(
+    secret_loader: Callable[[str, str], str] | None = None,
+) -> list[str]:
+    """Provider names with a discoverable key, in deterministic order."""
+
+    names: list[str] = []
+    for name in _CLOUD_ORDER:
+        spec = PROVIDERS[name]
+        if any(_get_secret(key_name, secret_loader) for key_name in spec.credential_names):
+            names.append(name)
+    return names
+
+
+def configured_providers(
+    secret_loader: Callable[[str, str], str] | None = None,
+) -> list[dict[str, Any]]:
+    """Return provider readiness without exposing any credential value.
+
+    Keyed providers are ``configured`` only when a credential resolves from the
+    environment, repo ``.env``, or the Concierge vault. Local and demo providers
+    need no key and are always marked configured; reachability is a separate
+    question and is deliberately not probed here.
+    """
+
+    rows: list[dict[str, Any]] = []
+    for name, spec in PROVIDERS.items():
+        has_key = False
+        if spec.needs_key:
+            has_key = any(
+                _get_secret(key_name, secret_loader)
+                for key_name in spec.credential_names
+            )
+        rows.append(
+            {
+                "name": name,
+                "configured": (not spec.needs_key) or has_key,
+                "requires_key": spec.needs_key,
+                "has_credential": has_key,
+                "credential_names": list(spec.credential_names),
+                "local": name in {"9router", "ai_gateway", "ollama"},
+                "offline": name == "demo",
+                "default_model": spec.default_model,
+            }
+        )
+    return rows
+
+
+class FallbackClient:
+    """Try a primary provider, then configured backups on retryable failures.
+
+    The wrapper keeps the same ``complete`` contract as ``ProviderClient``. Once
+    a backup succeeds it becomes sticky for the rest of the session, avoiding a
+    rate-limited provider on every turn. Backup calls use the backup provider's
+    own default model unless the caller supplied a provider-neutral model.
+    """
+
+    def __init__(self, clients: list[Any]) -> None:
+        if not clients:
+            raise ProviderError("No provider clients were supplied.")
+        self.clients = list(clients)
+        self.index = 0
+        self.provider = str(getattr(self.clients[0], "provider", "unknown"))
+        self.fallback_used = False
+        self.last_error: str | None = None
+
+    def _activate(self, index: int) -> None:
+        self.index = index
+        self.provider = str(getattr(self.clients[index], "provider", "unknown"))
+
+    def complete(self, **kwargs: Any) -> str:
+        last: ProviderError | None = None
+        for index in range(self.index, len(self.clients)):
+            client = self.clients[index]
+            call = dict(kwargs)
+            if index != self.index:
+                # A model name from the primary provider may not exist elsewhere;
+                # let the backup choose its configured/default model.
+                call["model"] = None
+            try:
+                text = client.complete(**call)
+                self._activate(index)
+                return text
+            except ProviderError as exc:
+                last = exc
+                if not getattr(exc, "retryable", False):
+                    raise
+                self.fallback_used = True
+                self.last_error = str(exc)
+                continue
+        raise last or ProviderError("All configured providers failed.")
+
+
+def build_client(
+    provider: str = "auto",
+    model: str | None = None,
+    *,
+    secret_loader: Callable[[str, str], str] | None = None,
+    fallback: bool = True,
+) -> Any:
+    """Resolve the primary client and add credential-backed fallbacks."""
+
+    primary = resolve_provider(provider, secret_loader=secret_loader)
+    requested = str(getattr(primary, "provider", provider or "auto")).lower()
+    if not fallback or requested == "demo":
+        return primary
+
+    clients: list[Any] = [primary]
+    for name in _configured_cloud_names(secret_loader):
+        if name == requested:
+            continue
+        try:
+            clients.append(ProviderClient(name, secret_loader=secret_loader))
+        except ProviderError:
+            continue
+    return FallbackClient(clients) if len(clients) > 1 else primary
 
 
 def resolve_provider(
@@ -480,10 +617,16 @@ class ProviderClient:
         except HTTPError as exc:
             detail = self._http_error_detail(exc)
             suffix = f": {detail}" if detail else ""
-            raise ProviderError(f"Provider '{self.provider}' returned HTTP {exc.code}{suffix}.") from None
+            raise ProviderError(
+                f"Provider '{self.provider}' returned HTTP {exc.code}{suffix}.",
+                status_code=exc.code,
+                retryable=exc.code == 429 or exc.code >= 500,
+            ) from None
         except (URLError, TimeoutError, socket.timeout, ConnectionError, OSError) as exc:
             reason = getattr(exc, "reason", None) or exc
-            raise ProviderError(f"Could not reach provider '{self.provider}': {reason}.") from None
+            raise ProviderError(
+                f"Could not reach provider '{self.provider}': {reason}.", retryable=True
+            ) from None
         except ValueError as exc:
             raise ProviderError(f"Provider '{self.provider}' returned invalid stream data: {exc}.") from None
         return "".join(chunks).strip()
@@ -540,13 +683,19 @@ class ProviderClient:
                     continue
                 detail = self._http_error_detail(exc)
                 suffix = f": {detail}" if detail else ""
-                raise ProviderError(f"Provider '{self.provider}' returned HTTP {exc.code}{suffix}.") from None
+                raise ProviderError(
+                    f"Provider '{self.provider}' returned HTTP {exc.code}{suffix}.",
+                    status_code=exc.code,
+                    retryable=exc.code == 429 or exc.code >= 500,
+                ) from None
             except (URLError, TimeoutError, socket.timeout, ConnectionError, OSError) as exc:
                 if attempt + 1 < attempts:
                     time.sleep(min(0.2 * (2**attempt), 1.0))
                     continue
                 reason = getattr(exc, "reason", None) or exc
-                raise ProviderError(f"Could not reach provider '{self.provider}': {reason}.") from None
+                raise ProviderError(
+                    f"Could not reach provider '{self.provider}': {reason}.", retryable=True
+                ) from None
             except (json.JSONDecodeError, UnicodeDecodeError) as exc:
                 raise ProviderError(f"Provider '{self.provider}' returned invalid JSON: {exc}.") from None
         raise ProviderError(f"Provider '{self.provider}' request failed after retries.")
