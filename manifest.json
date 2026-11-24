@@ -1,18 +1,18 @@
 {
   "meta": {
     "name": "Hotseat-Too",
-    "path": "/storage/emulated/0/RootBase/Hotseat-Too",
-    "languages": {},
-    "entrypoints": [],
-    "package_json": false,
-    "requirements": 0,
-    "readme_excerpt": "",
-    "last_modified": "2026-05-20T16:54:01.896999"
+    "description": "Local-first AI pressure cooker: idea audit, debate, personal panel, and a one-pass BMAD build brief.",
+    "entrypoint": "python -m hotseat_core",
+    "python": ">=3.10",
+    "tests": "python -m unittest discover -s tests -t ."
   },
-  "runbook": {
-    "commands": [],
-    "env": [],
-    "notes": []
-  },
-  "bard_note": "No obvious entrypoint. Bold choice. (Bardildo: harsh truth incoming)"
+  "hotseat_core": {
+    "provider": "auto",
+    "data_dir": "~/hotseat",
+    "styles": [],
+    "bridge": {
+      "host": "127.0.0.1",
+      "port": 8765
+    }
+  }
 }

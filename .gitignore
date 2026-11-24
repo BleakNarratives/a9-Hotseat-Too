@@ -1,2 +1,8 @@
 node_modules/
 .env
+
+# Python build/runtime artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
