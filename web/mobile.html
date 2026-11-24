@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#120b09">
+  <title>THE HOT SEAT — Companion</title>
+  <link rel="stylesheet" href="/mobile.css">
+</head>
+<body data-screen="setup" data-mode="arena">
+  <header class="topbar">
+    <a class="wordmark" href="/?desktop=1" data-view-link>
+      THE HOT SEAT <span>// COMPANION</span>
+    </a>
+    <div class="topbar-actions">
+      <span class="status-pill" id="conn-pill" data-state="idle" aria-live="polite">READY</span>
+      <a class="ghost-link" href="/?desktop=1" data-view-link>WAR ROOM</a>
+    </div>
+  </header>
+
+  <main class="app-main" id="app-main">
+    <section class="screen setup-screen" id="setup-screen" aria-labelledby="setup-title">
+      <div class="setup-intro">
+        <p class="eyebrow">CHRONOSCOUTS // COMPANION</p>
+        <h1 id="setup-title">PUT IT IN<br><span>THE CHAIR.</span></h1>
+        <p class="lede">One idea. Three rivals. Five turns. A verdict you can actually use.</p>
+      </div>
+
+      <form id="setup-form" novalidate>
+        <div class="field-block">
+          <div class="field-head">
+            <label class="field-label" for="seed-input">THE SEED</label>
+            <button class="mini-button" id="seed-mic" type="button" aria-pressed="false" title="Push to talk">
+              <span class="mic-dot" aria-hidden="true"></span> MIC
+            </button>
+          </div>
+          <textarea id="seed-input" rows="5" autocomplete="off" placeholder="Pitch the idea, decision, or beautiful mess. Be specific. The room will not be."></textarea>
+          <span class="field-help" id="seed-mic-status">Type it or tap MIC.</span>
+        </div>
+
+        <div class="field-block">
+          <span class="field-label">CONSTRAINTS</span>
+          <div class="chips" id="constraint-chips" aria-label="Constraint presets">
+            <button class="chip" type="button" data-constraint="budget $0" aria-pressed="false">BUDGET $0</button>
+            <button class="chip" type="button" data-constraint="ship in 2 weeks" aria-pressed="false">2 WEEKS</button>
+            <button class="chip" type="button" data-constraint="solo founder" aria-pressed="false">SOLO</button>
+            <button class="chip" type="button" data-constraint="no ads" aria-pressed="false">NO ADS</button>
+            <button class="chip" type="button" data-constraint="local-first" aria-pressed="false">LOCAL-FIRST</button>
+          </div>
+          <input id="constraint-input" type="text" autocomplete="off" placeholder="Custom constraints">
+          <span class="field-help">The rivals must live inside these limits.</span>
+        </div>
+
+        <label class="switch-row">
+          <span>
+            <strong>Attach live scout intel</strong>
+            <small>Market signals, prices, and anchors ride into the prompts.</small>
+          </span>
+          <input id="attach-scouts" type="checkbox" checked>
+          <span class="switch-track" aria-hidden="true"><span></span></span>
+        </label>
+
+        <div class="provider-summary" aria-live="polite">
+          <div>
+            <span class="field-label">PROVIDERS</span>
+            <strong id="provider-summary">CHECKING…</strong>
+          </div>
+          <span id="provider-summary-detail" class="summary-detail">credential readiness</span>
+        </div>
+
+        <details class="advanced" id="advanced">
+          <summary>
+            <span>ADVANCED ROUTING</span>
+            <span class="summary-chevron" aria-hidden="true">+</span>
+          </summary>
+          <div class="advanced-body">
+            <label class="field">
+              <span class="field-label">MODE</span>
+              <select id="mode-select"></select>
+            </label>
+            <label class="field">
+              <span class="field-label">PROVIDER</span>
+              <select id="provider-select"></select>
+              <span class="field-help" id="provider-hint">auto resolves local or configured credentials</span>
+            </label>
+            <div class="provider-list" id="provider-list"></div>
+            <div class="roles-head">
+              <span class="field-label">PER-ROLE MODELS</span>
+              <button class="link-button" id="roles-clear" type="button">CLEAR</button>
+            </div>
+            <div class="roles-list" id="roles-list"><p class="muted">Load a mode to assign models.</p></div>
+            <p class="field-help">Blank uses the persona default. Fast models for Producer/Critic; stronger reasoning for Foreman, Architect, Coroner.</p>
+          </div>
+        </details>
+
+        <p class="error-line" id="error-line" role="alert" hidden></p>
+
+        <div class="setup-cta">
+          <button class="primary-button" id="launch-button" type="button">CONVENE THE ROOM</button>
+          <span class="cta-note">5 turns · one verdict · no scores out of 100</span>
+        </div>
+      </form>
+    </section>
+
+    <section class="stage-placeholder" id="stage-placeholder" hidden>
+      <p class="eyebrow">COMPANION STAGE</p>
+      <h2>THE ROOM IS WAITING.</h2>
+      <p>Set the seed on the left. The Producer, Critic, Foreman, Architect, and Coroner will take it from there.</p>
+    </section>
+
+    <section class="screen live-screen" id="live-screen" aria-labelledby="live-topic" hidden>
+      <div class="live-head">
+        <div>
+          <p class="eyebrow" id="live-mode">ARENA // LIVE</p>
+          <h1 id="live-topic">THE ROOM IS OPENING.</h1>
+        </div>
+        <span class="status-pill" id="stage-status" data-state="live" aria-live="polite">OPENING</span>
+      </div>
+
+      <div class="progress" id="progress" aria-label="Arena progress"></div>
+
+      <article class="spotlight" aria-live="polite">
+        <p class="eyebrow">NOW SPEAKING</p>
+        <h2 id="spotlight-speaker">THE ROOM</h2>
+        <p id="spotlight-text">The Producer is taking the first chair.</p>
+      </article>
+
+      <div class="section-label-row">
+        <span class="field-label">CONTENDERS</span>
+        <span class="section-note">swipe to inspect</span>
+      </div>
+      <div class="contender-strip" id="mobile-bracket" aria-label="Arena contenders"></div>
+
+      <div class="segment" id="live-tabs" role="tablist" aria-label="Live detail">
+        <button class="segment-button is-active" type="button" role="tab" aria-selected="true" data-tab-group="live" data-tab="brief">BRIEF</button>
+        <button class="segment-button" type="button" role="tab" aria-selected="false" data-tab-group="live" data-tab="critics">CRITICS</button>
+        <button class="segment-button" type="button" role="tab" aria-selected="false" data-tab-group="live" data-tab="evidence">EVIDENCE</button>
+        <button class="segment-button" type="button" role="tab" aria-selected="false" data-tab-group="live" data-tab="transcript">TRANSCRIPT</button>
+      </div>
+
+      <div class="panel-stack">
+        <section class="detail-panel" data-live-panel="brief">
+          <h3>BUILD BRIEF</h3>
+          <div class="detail-body" id="live-brief-body"><p class="muted">The Architect's slice appears after the Foreman's call.</p></div>
+        </section>
+        <section class="detail-panel" data-live-panel="critics" hidden>
+          <h3>CROSS-EXAMINATION</h3>
+          <div class="detail-body" id="live-critic-body"><p class="muted">The Critic is sharpening something.</p></div>
+          <h3 class="subhead">THE FOREMAN'S CALL</h3>
+          <div class="detail-body" id="live-foreman-body"><p class="muted">Nobody has been eliminated yet.</p></div>
+        </section>
+        <section class="detail-panel" data-live-panel="evidence" hidden>
+          <h3>MARKET EVIDENCE</h3>
+          <p class="detail-body" id="evidence-summary">No sweep on file yet.</p>
+          <div class="evidence-anchors" id="evidence-anchors"></div>
+          <button class="secondary-button" id="open-intel" type="button">OPEN SCOUT INTEL</button>
+        </section>
+        <section class="detail-panel transcript-panel" data-live-panel="transcript" hidden>
+          <h3>FLOOR TRANSCRIPT <span class="live-flag" id="live-flag" hidden>LIVE</span></h3>
+          <div class="mobile-turns" id="mobile-turns" aria-live="polite">
+            <p class="muted">No turns yet.</p>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <section class="screen verdict-screen" id="verdict-screen" aria-labelledby="verdict-title" hidden>
+      <div class="verdict-head">
+        <div>
+          <p class="eyebrow">FINAL CALL</p>
+          <h1 id="verdict-title">THE ROOM<br><span>HAS SPOKEN.</span></h1>
+        </div>
+        <button class="secondary-button compact" id="new-idea" type="button">NEW IDEA</button>
+      </div>
+
+      <article class="winner-card" id="winner-card" aria-live="polite">
+        <span class="winner-tag">WINNER</span>
+        <h2 id="winner-name">THE ROOM HAS SPOKEN</h2>
+        <p id="winner-copy">The Foreman's deciding difference appears here.</p>
+      </article>
+
+      <div class="segment" id="verdict-tabs" role="tablist" aria-label="Verdict detail">
+        <button class="segment-button is-active" type="button" role="tab" aria-selected="true" data-tab-group="verdict" data-tab="critic">CRITIC</button>
+        <button class="segment-button" type="button" role="tab" aria-selected="false" data-tab-group="verdict" data-tab="foreman">FOREMAN</button>
+        <button class="segment-button" type="button" role="tab" aria-selected="false" data-tab-group="verdict" data-tab="brief">BUILD BRIEF</button>
+        <button class="segment-button" type="button" role="tab" aria-selected="false" data-tab-group="verdict" data-tab="autopsy">AUTOPSY</button>
+      </div>
+
+      <div class="panel-stack verdict-panels">
+        <section class="detail-panel" data-verdict-panel="critic">
+          <h3>CROSS-EXAMINATION</h3>
+          <div class="detail-body" id="verdict-critic"><p class="muted">No critique recorded.</p></div>
+        </section>
+        <section class="detail-panel" data-verdict-panel="foreman" hidden>
+          <h3>THE FOREMAN'S CALL</h3>
+          <div class="detail-body" id="verdict-foreman"><p class="muted">No decision recorded.</p></div>
+        </section>
+        <section class="detail-panel" data-verdict-panel="brief" hidden>
+          <h3>ARCHITECT — VERTICAL SLICE</h3>
+          <div class="detail-body" id="verdict-brief"><p class="muted">No build brief recorded.</p></div>
+        </section>
+        <section class="detail-panel" data-verdict-panel="autopsy" hidden>
+          <h3>CORONER — AUTOPSY</h3>
+          <div class="detail-body" id="verdict-autopsy"><p class="muted">No autopsy recorded.</p></div>
+        </section>
+      </div>
+
+      <div class="export-actions">
+        <button class="secondary-button" id="share-button" type="button">SHARE</button>
+        <button class="secondary-button" id="copy-button" type="button">COPY MD</button>
+        <button class="secondary-button" id="download-button" type="button">DOWNLOAD .MD</button>
+        <p class="export-status" id="export-status" aria-live="polite"></p>
+      </div>
+    </section>
+  </main>
+
+  <div class="sheet" id="intel-sheet" hidden>
+    <div class="sheet-backdrop" data-close-intel></div>
+    <section class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="intel-title">
+      <div class="sheet-head">
+        <div>
+          <p class="eyebrow">CHRONOSCOUTS</p>
+          <h2 id="intel-title">SCOUT INTEL</h2>
+        </div>
+        <button class="icon-button" id="intel-close" type="button" aria-label="Close scout intel">CLOSE</button>
+      </div>
+      <div class="sheet-scroll">
+        <p class="intel-meta" id="intel-meta">No sweep on file yet.</p>
+        <div id="intel-body"><p class="muted">Pull fresh intel or launch with scouts attached.</p></div>
+      </div>
+      <div class="sheet-actions">
+        <button class="secondary-button" id="intel-refresh" type="button">PULL FRESH INTEL</button>
+      </div>
+    </section>
+  </div>
+
+  <div class="fixed-bar live-bar" id="live-bar" hidden>
+    <button class="mic-button" id="live-mic" type="button" aria-pressed="false" title="Push to talk">
+      <span class="mic-dot" aria-hidden="true"></span> MIC
+    </button>
+    <div class="bar-status-wrap">
+      <span class="status-pill" id="bar-status" data-state="live" aria-live="polite">LIVE</span>
+      <span class="field-help" id="mic-status">tap to dictate</span>
+    </div>
+    <form class="bar-followup" id="followup-form">
+      <input id="followup-input" type="text" autocomplete="off" placeholder="Draft a follow-up for the room…" aria-label="Follow-up message">
+      <button class="primary-button compact" id="followup-button" type="submit" disabled>SEND</button>
+    </form>
+  </div>
+
+  <noscript><p class="noscript">The Companion needs JavaScript and the local Hotseat bridge.</p></noscript>
+  <script src="/mobile.js"></script>
+</body>
+</html>

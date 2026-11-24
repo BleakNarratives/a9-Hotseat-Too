@@ -1,6 +1,6 @@
 # Hotseat Bridge — Frontend Contract
 
-**Version:** 0.4 · **Transport:** HTTP/1.1 + Server-Sent Events (SSE) + NDJSON
+**Version:** 0.5 · **Transport:** HTTP/1.1 + Server-Sent Events (SSE) + NDJSON
 **Implementation:** [`hotseat_core/bridge.py`](hotseat_core/bridge.py) · **No third-party dependencies**
 
 The bridge lets a CLI, desktop app, or web UI drive a Hotseat session without
@@ -17,11 +17,17 @@ python -m hotseat_core --serve --port 9000
 python -m hotseat_core --serve --provider demo # no keys, no models, demo replies
 ```
 
-`--serve` also hosts the built-in live console at `/`: `web/index.html`,
+`--serve` also hosts the desktop war room at `/`: `web/index.html`,
 `web/style.css`, and `web/app.js`. It is not a canned page; it reads `/modes`,
 `/providers`, `/scouts/latest`, starts sessions through `POST /sessions`, and
-streams the session through SSE. Only those three files are served — there is no
-filesystem or directory endpoint.
+streams the session through SSE.
+
+Phones and tablets get a dedicated companion at `/m`: `web/mobile.html`,
+`web/mobile.css`, and `web/mobile.js`. It uses the same API and SSE endpoints
+but has a separate setup → live → verdict flow. The desktop page redirects to
+`/m` below 768px unless `?desktop=1` is present. Both shells link to each other.
+Only these six files and the `/m` alias are served — there is no filesystem or
+directory endpoint.
 
 The same contract is available as a streaming CLI:
 
@@ -42,9 +48,10 @@ stdout; human status goes to stderr.
 | CORS | off | `--allow-origin http://localhost:3000` (repeatable, exact match). |
 
 There is **no filesystem endpoint**. The legacy v3 `/list/{dir}` surface was not
-carried forward. The only static routes are the three web assets above. Bind to
-loopback, or set a token and an exact CORS origin. Static assets are public so
-the page can load; API calls still require the token (the UI reads `?token=`).
+carried forward. The only static routes are the six web assets above (`/m` maps
+to `mobile.html`). Bind to loopback, or set a token and an exact CORS origin.
+Static assets are public so the page can load; API calls still require the token
+(the UI reads `?token=` and carries it to `/m`).
 
 All JSON responses send `Cache-Control: no-store`. Unknown routes return 404;
 unknown sessions 404; invalid bodies 400; missing/invalid token 401.

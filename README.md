@@ -204,6 +204,15 @@ keys the bridge discovered, the role drawer routes models per persona, and
 **Export brief** downloads the bracket, Architect slice, and Coroner autopsy as
 one Markdown file.
 
+Phones and tablets get a dedicated companion at **http://127.0.0.1:8765/m**.
+It keeps the same bridge and SSE contract but replaces the dense war-room grid
+with a three-state flow: setup, live, and verdict. Setup uses constraint chips and
+a sticky Convene button; live has a speaker spotlight, five-step progress rail,
+swipeable contenders, segmented detail tabs, and a Scout Intel bottom sheet; the
+verdict starts with the winner and offers Share, Copy Markdown, and Download .md.
+The `/` route auto-redirects below 768px unless `?desktop=1` is present, and both
+headers link between War Room and Companion.
+
 ## Live ChronoScouts & market intel
 
 Every arena run can carry real, timestamped market evidence into the Producer,
@@ -274,9 +283,9 @@ hotseat_core/
   runtime.py      orchestration, events, persistence, threaded follow-ups
   cli.py          python -m hotseat_core
   bridge.py       HTTP/SSE/NDJSON adapter + static console serving
-web/              zero-dependency live terminal-arena console
+web/              zero-dependency war room + /m companion shell
 vault_loader.py   compatibility shim for older imports
-tests/            60 tests, stdlib only
+tests/            61 tests, stdlib only
 docs/             extracted legacy context, decisions, and the unbuilt show concept
 ```
 
@@ -319,8 +328,8 @@ model routing, 429/timeout fallback routing, provider-status credential presence
 without secret values, persona resolution and overrides, legacy SQLite migration,
 JSONL and legacy logs, every engine including `bmad` and `arena`, scout evidence
 injection, ChronoScouts JSON/SQLite ingestion, live fetcher parsing, structured
-market anchors, threaded follow-ups, NDJSON output, HTTP endpoints, static
-console routes, token auth, and the loopback-binding guard. CI runs on Python
+market anchors, threaded follow-ups, NDJSON output, HTTP endpoints, static war
+room and `/m` companion routes, token auth, and the loopback-binding guard. CI runs on Python
 3.10–3.12.
 
 ## Termux
@@ -342,6 +351,7 @@ python -m hotseat_core --provider ollama --mode classic "my idea"
 - [x] Live ChronoScouts + market/pricing evidence in arena prompts
 - [x] Per-role model routing + automatic provider fallback
 - [x] Provider status badges, role drawer, Markdown brief export
+- [x] Phone/tablet companion shell at `/m`
 - [ ] Full season: eight-character roster, user-built persona, escalation arc
 - [ ] Private and duo sessions, and the cross-remark engine
 - [ ] Optional embedding recall across sessions

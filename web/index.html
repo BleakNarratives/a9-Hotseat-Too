@@ -4,6 +4,17 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>THE HOT SEAT — ChronoScouts Arena</title>
+  <script>
+    (function () {
+      var params = new URLSearchParams(window.location.search);
+      if (params.get("desktop") === "1") return;
+      if (window.innerWidth < 768) {
+        var next = new URLSearchParams(window.location.search);
+        next.delete("desktop");
+        window.location.replace("/m" + (next.toString() ? "?" + next.toString() : ""));
+      }
+    })();
+  </script>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body data-mode="arena">
@@ -21,6 +32,7 @@
         <span class="led" id="conn-led" data-state="idle"></span>
         <span id="conn-label">STANDING BY</span>
       </div>
+      <a class="view-link" href="/m" data-view-link>COMPANION</a>
       <button class="switch" id="theme-toggle" type="button" aria-pressed="false">
         <span class="switch-dot"></span> SWITCHBOARD
       </button>

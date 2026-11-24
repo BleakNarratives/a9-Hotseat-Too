@@ -47,6 +47,13 @@
     return path + (path.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(value);
   }
 
+  function syncViewLinks() {
+    document.querySelectorAll("[data-view-link]").forEach((link) => {
+      const href = link.getAttribute("href");
+      if (href) link.href = withToken(href);
+    });
+  }
+
   async function api(path, options) {
     const headers = { "Content-Type": "application/json" };
     if (token()) headers.Authorization = "Bearer " + token();
@@ -1085,6 +1092,7 @@
   }
 
   function init() {
+    syncViewLinks();
     setupTheme();
     setupDrawer();
     setupMicrophone();

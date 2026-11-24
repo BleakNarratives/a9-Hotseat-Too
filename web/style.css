@@ -139,6 +139,19 @@ body::before {
   padding-bottom: 6px;
 }
 
+.view-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  color: var(--accent);
+  font-size: 9px;
+  letter-spacing: .14em;
+  text-decoration: none;
+}
+.view-link:hover { border-color: var(--accent); background: var(--brown); }
+
 .status-stack {
   display: flex;
   align-items: center;
