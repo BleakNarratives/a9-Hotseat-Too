@@ -41,7 +41,7 @@ The old prompts addressed “Michael” directly and repeated the same biography
 every system message. The new ones speak to “the person in the hot seat”, which
 makes the tool usable by anyone without losing the voice.
 
-## The unbuilt show concept
+## The show concept
 
 From `hotseat_handoff.md`: **Drawn Together meets Survivor** — a cast with
 backstories, chemistry, an escalation arc, a vote-off, and a closing dismissal
@@ -64,9 +64,11 @@ Escalation arc: help → bicker → fight → someone walks out → silence → 
 gonna be fine, stop making everything about yourself.”
 
 Pairing chemistry (Wendell+Carl, Gloria+Wendell, Barb+Felix, Vance+Dale, Carl+Barb)
-and a `temperature` per character were specified. This is the persona-pack
-backlog; it is not implemented, and it should stay optional rather than bloat the
-default session.
+and a `temperature` per character were specified. The arena format now ships as
+`arena` mode (four contenders, cross-exam, vote-off, brief, autopsy). The
+eight-character roster, escalation arc, and user-built persona remain the
+persona-pack backlog; they should stay optional rather than bloat the default
+session.
 
 ## Session shapes worth reviving
 
@@ -77,7 +79,8 @@ default session.
 * **Menu** — a text menu instead of flags. The current CLI uses flags and a REPL;
   a frontend covers the menu case.
 
-Only panel and tribunal turn structures exist today; the others are roadmap.
+Panel, tribunal, brief, and arena turn structures exist today; private and duo
+sessions and the cross-remark engine are roadmap.
 
 ## Model routing learned on a phone
 

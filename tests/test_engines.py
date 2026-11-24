@@ -61,6 +61,41 @@ class EngineTests(unittest.TestCase):
         self.assertIn("bmad:brief", result.transcript)
         self.assertEqual(len(result.turns), 5)
 
+    def test_arena_runs_four_contenders_to_a_brief_and_autopsy(self):
+        runtime = self.runtime()
+        result = runtime.run_session(
+            "arena", "a CLI that turns a voice memo into tasks", save=False
+        )
+        self.assertEqual(
+            [t.persona for t in result.turns],
+            ["producer", "critic", "foreman", "architect", "coroner"],
+        )
+        self.assertEqual(result.variant, "season")
+        self.assertIn("arena:season", result.transcript)
+
+    def test_arena_constraints_reach_the_producer(self):
+        seen = []
+
+        class Recorder:
+            provider = "recorder"
+
+            def complete(self, *, messages, model=None, system=None, sampling=None, on_chunk=None):
+                seen.append(messages[-1]["content"])
+                if on_chunk:
+                    on_chunk("ok")
+                return "ok"
+
+        config = load_config(root=self.root, env={"HOTSEAT_DATA_DIR": str(self.root)})
+        runtime = HotseatRuntime(
+            config,
+            store=SessionStore(config.db_path, config.session_log),
+            client_factory=lambda provider, model: Recorder(),
+        )
+        runtime.run_session(
+            "arena", "seed", save=False, options={"constraints": "budget $0, one weekend"}
+        )
+        self.assertIn("budget $0, one weekend", seen[0])
+
     def test_stop_event_ends_after_current_turn(self):
         runtime = self.runtime()
         stop = threading.Event()

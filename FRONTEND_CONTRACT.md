@@ -166,13 +166,16 @@ Starts a session in a background thread. Returns immediately.
   "styles": ["nosyco", "terse"],
   "system_directive": "This is a family business; the answer must include a Tuesday.",
   "sampling": { "temperature": 0.7, "max_tokens": 300 },
-  "options": { "statement": "v2 only: the volunteer's opening statement" },
+  "options": {
+    "statement": "v2 only: the volunteer's opening statement",
+    "constraints": "arena only: budget $0, one weekend"
+  },
   "personas": { "fixer": { "model": "tinyllama:latest" } }
 }
 ```
 
-Only `mode` and `topic` are required. `mode` is `classic`, `v2`, `v3`, or `bmad`.
-Response `202`:
+Only `mode` and `topic` are required. `mode` is `classic`, `v2`, `v3`, `bmad`, or
+`arena`. Response `202`:
 
 ```json
 {

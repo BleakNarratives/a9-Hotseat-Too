@@ -25,6 +25,10 @@ class PersonaTests(unittest.TestCase):
             [p.key for p in get_persona_set("bmad").personas],
             ["analyst", "pm", "architect", "builder", "qa"],
         )
+        self.assertEqual(
+            [p.key for p in get_persona_set("arena").personas],
+            ["producer", "critic", "foreman", "architect", "coroner"],
+        )
 
     def test_default_variant_and_closer(self):
         panel = get_persona_set("v3")
@@ -61,6 +65,7 @@ class PersonaTests(unittest.TestCase):
         self.assertEqual(set(modes), set(MODES))
         self.assertEqual(modes["v3"]["variants"], ["panel", "tribunal"])
         self.assertEqual(modes["bmad"]["variants"], ["brief"])
+        self.assertEqual(modes["arena"]["variants"], ["season"])
 
     def test_public_payload_hides_system_by_default(self):
         public = get_persona_set("classic").by_key("audrey").public()

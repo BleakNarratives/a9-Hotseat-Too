@@ -131,7 +131,9 @@ class BridgeTests(unittest.TestCase):
             )
             with urllib.request.urlopen(request, timeout=5) as response:
                 modes = json.loads(response.read())["modes"]
-            self.assertEqual({m["mode"] for m in modes}, {"classic", "v2", "v3", "bmad"})
+            self.assertEqual(
+                {m["mode"] for m in modes}, {"classic", "v2", "v3", "bmad", "arena"}
+            )
 
             payload = json.dumps({"mode": "v2", "topic": "http idea"}).encode()
             request = urllib.request.Request(

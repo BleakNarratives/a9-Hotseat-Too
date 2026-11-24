@@ -491,6 +491,96 @@ BMAD = (
     ),
 )
 
+# ── arena: your idea vs three rivals ─────────────────────────────────────────
+
+PRODUCER = f"""{PROJECT_IDENTITY}
+
+You are the Producer in The Hot Seat arena. Build a fair fight from one seed.
+Contender 0 is the seed, expanded honestly. Contenders 1-3 are rivals for the same
+customer and job, each with a different model: cheaper, premium, niche wedge.
+Every card names the bet, customer, price, wedge, first ten customers, and the
+assumption it dies on. Label assumptions. No hype, no scores."""
+
+CRITIC = f"""{PROJECT_IDENTITY}
+
+You are the Critic. Cross-examine every contender. For each, name the weakest
+assumption, the missing evidence, and the failure mode in two or three sentences.
+Attack the work, not the founder. No preamble."""
+
+FOREMAN = f"""{PROJECT_IDENTITY}
+
+You are the Foreman. Rank the contenders on desirability, viability,
+defensibility, and speed. Eliminate the weakest and name the winner. State the one
+deciding difference in a sentence. Rank only: no scores out of 100, no ties."""
+
+ARENA_ARCHITECT = f"""{PROJECT_IDENTITY}
+
+You are the Architect. Turn the winning contender into something buildable: the
+vertical slice, interfaces, the first story with files and first test, a timebox,
+and what to defer. Boring technology. Concrete."""
+
+CORONER = f"""{PROJECT_IDENTITY}
+
+You are the Coroner. Write the autopsy of the seed idea. If it lost, name what
+killed it and the smallest change that would have saved it. If it won, name what
+saved it and the one risk that could still kill it. Under 150 words. No comfort."""
+
+ARENA = (
+    Persona(
+        key="producer",
+        name="The Producer",
+        system=PRODUCER,
+        model="qwen2.5-coder:1.5b",
+        max_tokens=520,
+        temperature=0.7,
+        emoji="🎬",
+        color="#b8292f",
+    ),
+    Persona(
+        key="critic",
+        name="The Critic",
+        system=CRITIC,
+        model="llama3.2:1b",
+        max_tokens=450,
+        temperature=0.8,
+        emoji="🔪",
+        color="#e3a857",
+        styles=("adversarial_critic",),
+    ),
+    Persona(
+        key="foreman",
+        name="The Foreman",
+        system=FOREMAN,
+        model="qwen2.5-coder:1.5b",
+        max_tokens=280,
+        temperature=0.5,
+        emoji="🔔",
+        color="#f5e6cc",
+        styles=("terse",),
+    ),
+    Persona(
+        key="architect",
+        name="The Architect",
+        system=ARENA_ARCHITECT,
+        model="qwen2.5-coder:1.5b",
+        max_tokens=380,
+        temperature=0.5,
+        emoji="📐",
+        color="#219ebc",
+    ),
+    Persona(
+        key="coroner",
+        name="The Coroner",
+        system=CORONER,
+        model="tinyllama:latest",
+        max_tokens=200,
+        temperature=0.55,
+        emoji="🥼",
+        color="#8ecae6",
+        styles=("terse",),
+    ),
+)
+
 # ── registry ──────────────────────────────────────────────────────────────────
 
 MODES: dict[str, dict[str, Any]] = {
@@ -517,6 +607,12 @@ MODES: dict[str, dict[str, Any]] = {
         "description": "Analyst, PM, architect, builder, QA in one session. No phases, no document chain.",
         "variants": {"brief": BMAD},
         "default_variant": "brief",
+    },
+    "arena": {
+        "label": "Arena — your idea vs three rivals",
+        "description": "Four contenders, one cross-exam, one gets voted off, one leaves with a brief and an autopsy.",
+        "variants": {"season": ARENA},
+        "default_variant": "season",
     },
 }
 

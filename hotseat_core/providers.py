@@ -123,6 +123,26 @@ DEMO_LINES: tuple[tuple[str, str], ...] = (
         "1. Name one owner. 2. Ship the smallest version this week. 3. Log every session and review the log in fourteen days.",
     ),
     (
+        "You are the Producer",
+        "CONTENDER 0 — YOUR IDEA: the seed as pitched. Customer: solo builders. Price: $12/mo. Wedge: one command, local-first. First ten: your own timeline. Dies on: whether anyone wants a fourth note-taking tool.\nCONTENDER 1 — THE CHEAP ONE: one button, $0 + tips. Wedge: no setup. First ten: a Reddit thread. Dies on: no support model.\nCONTENDER 2 — THE PREMIUM ONE: done-for-you at $2,500/mo. Wedge: white glove. First ten: warm intros. Dies on: founder time.\nCONTENDER 3 — THE NICHE WEDGE: only roofing contractors, $99/mo. Wedge: pre-filled quotes. First ten: one trade group. Dies on: a narrow market that will not pay.",
+    ),
+    (
+        "You are the Critic",
+        "YOUR IDEA: the weakest assumption is that the user wants another tool. Cheap One: free has no support loop. Premium One: the founder is the product. Niche Wedge: distribution depends on a group you do not belong to. All four are missing evidence that anyone pays twice.",
+    ),
+    (
+        "You are the Foreman",
+        "Winner: THE NICHE WEDGE. Deciding difference: it can name its first ten customers this week. Eliminated: YOUR IDEA — a feature looking for a buyer. Ranking: Niche Wedge, Premium, Cheap, Yours.",
+    ),
+    (
+        "You are the Architect. Turn the winning contender",
+        "Slice: one trade, one template, one quote. Files: `app.py`, `templates/roofing.md`, `tests/test_quote.py`. First story: a roofer pastes a job note and gets a quote in 30 seconds. Timebox: two sessions. Defer: accounts, sync, other trades.",
+    ),
+    (
+        "You are the Coroner",
+        "Your idea died of distribution, not quality. The smallest change that would have saved it: pick one trade and one repeated job, and sell the output before building the app. Risk for the winner: the niche is real but small; price the second template before the first invoice.",
+    ),
+    (
         "You are the Analyst",
         "The user is not short of tools; they are short of a decision. Evidence: none yet, only the founder's certainty. The assumption that kills this: people record a memo and never open the list.",
     ),

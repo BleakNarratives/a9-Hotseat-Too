@@ -56,6 +56,7 @@ and test the contract before anyone buys a token.
 
 | Mode | Cast | Use it for |
 | :--- | :--- | :--- |
+| `arena` | Producer → Critic → Foreman → Architect → Coroner | Your idea vs three generated rivals |
 | `classic` | Dame Audrey (auditor) → Claib (market) → Vertical AI (closer) | Ideas, pitches, “is this stupid?” |
 | `v2` | Three skeptics → a volunteer defending the idea | Debate; `--statement` sets the defence |
 | `v3 panel` | Marlowe (witness) → Priya (systems) → Zero (closer) | Personal decisions and life inventory |
@@ -67,6 +68,29 @@ python -m hotseat_core --list-modes
 python -m hotseat_core --list-personas bmad
 python -m hotseat_core --mode v3 --variant tribunal "hire or contract?"
 ```
+
+## Your idea vs three rivals
+
+The arena is the front door: your idea is contender zero, and the panel generates
+three rivals for the same customer and job — cheaper, premium, and a niche wedge.
+They are cross-examined, ranked, and one is voted off. The winner gets a build
+brief; yours gets an autopsy either way.
+
+```bash
+python -m hotseat_core --mode arena "a CLI that turns a voice memo into tasks" \
+  --constraint "budget $0" --constraint "one weekend"
+```
+
+1. **The Producer** builds four fair contenders, each with a bet, price, wedge,
+   first ten customers, and the assumption it dies on.
+2. **The Critic** cross-examines all four.
+3. **The Foreman** ranks and eliminates one, with the deciding difference.
+4. **The Architect** gives the survivor a vertical-slice build brief.
+5. **The Coroner** writes the autopsy: what killed your idea, and the smallest
+   change that would have saved it.
+
+Five turns, one session, no scores out of 100. It is also the practical front door
+to a Vertical AI boardroom: the same cast, memory, and event stream in one command.
 
 ## BMAD without the ceremony
 
@@ -163,7 +187,7 @@ hotseat_core/
   runtime.py     orchestration, events, persistence
   cli.py         python -m hotseat_core
   bridge.py      HTTP/SSE/NDJSON adapter
-tests/           31 tests, stdlib only
+tests/           33 tests, stdlib only
 docs/            extracted legacy context, decisions, and the unbuilt show concept
 ```
 
@@ -216,12 +240,13 @@ python -m hotseat_core --provider ollama --mode classic "my idea"
 
 ## Roadmap
 
-- [x] One package: classic, v2, v3 panel/tribunal, and BMAD-lite
+- [x] One package: classic, v2, v3 panel/tribunal, BMAD-lite, and Arena
 - [x] Zero-dependency core, provider layer, safe demo mode
 - [x] Structured NDJSON + HTTP/SSE bridge and frontend contract
 - [x] Extract legacy context, remove the bulk
+- [x] Arena: seed vs three rivals, cross-exam, vote-off, brief, autopsy
 - [ ] FreeBuff / web frontend built against the contract
-- [ ] The eight-character “Drawn Together × Survivor” persona pack
+- [ ] Full season: eight-character roster, user-built persona, escalation arc
 - [ ] Private and duo sessions, and the cross-remark engine
 - [ ] Optional embedding recall across sessions
 

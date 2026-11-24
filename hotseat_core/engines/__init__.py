@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from ..personas import PersonaSet
+from .arena import ArenaEngine
 from .base import Engine, Turn, TurnRequest, render_transcript
 from .bmad import BriefEngine
 from .classic import ClassicEngine
@@ -17,6 +18,7 @@ ENGINES = {
     "v3.panel": PanelEngine,
     "v3.tribunal": TribunalEngine,
     "bmad": BriefEngine,
+    "arena": ArenaEngine,
 }
 
 
@@ -47,6 +49,7 @@ def build_engine(
 
 __all__ = [
     "ENGINES",
+    "ArenaEngine",
     "BriefEngine",
     "ClassicEngine",
     "DebateEngine",

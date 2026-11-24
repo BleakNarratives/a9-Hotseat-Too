@@ -10,6 +10,7 @@ Quick start::
     python -m hotseat_core --provider demo "ship the small version"
     python -m hotseat_core --mode v3 --variant tribunal "hire or contract?"
     python -m hotseat_core --mode bmad "brief this build in one pass"
+    python -m hotseat_core --mode arena "your idea vs three rivals"
     python -m hotseat_core --serve
 """
 
