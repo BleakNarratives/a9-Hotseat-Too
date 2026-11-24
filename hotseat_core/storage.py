@@ -74,6 +74,30 @@ def _normalize_turn(turn: Any) -> dict[str, Any] | None:
     }
 
 
+def _session_from_record(record: Mapping[str, Any]) -> dict[str, Any]:
+    turns: list[dict[str, Any]] = []
+    raw_turns = record.get("turns")
+    if raw_turns:
+        try:
+            parsed = json.loads(raw_turns)
+        except (TypeError, ValueError):
+            parsed = None
+        if isinstance(parsed, list):
+            turns = [turn for turn in (_normalize_turn(t) for t in parsed) if turn]
+    if not turns:
+        turns = _turns_from_legacy(record)
+    return {
+        "id": record.get("id"),
+        "timestamp": record.get("timestamp"),
+        "mode": record.get("mode") or "classic",
+        "topic": record.get("topic"),
+        "turns": turns,
+        "transcript": record.get("transcript"),
+        "provider": record.get("provider"),
+        "model": record.get("model"),
+    }
+
+
 def _turns_from_legacy(row: Mapping[str, Any]) -> list[dict[str, Any]]:
     turns: list[dict[str, Any]] = []
     for column in LEGACY_PERSONA_COLUMNS:
@@ -235,33 +259,64 @@ class SessionStore:
         except sqlite3.Error as exc:
             raise StorageError(f"Cannot read sessions: {exc}") from exc
 
-        sessions: list[dict[str, Any]] = []
-        for row in rows:
-            record = {key: row[key] for key in row.keys()}
-            turns: list[dict[str, Any]] = []
-            raw_turns = record.get("turns")
-            if raw_turns:
-                try:
-                    parsed = json.loads(raw_turns)
-                except (TypeError, ValueError):
-                    parsed = None
-                if isinstance(parsed, list):
-                    turns = [turn for turn in (_normalize_turn(t) for t in parsed) if turn]
-            if not turns:
-                turns = _turns_from_legacy(record)
-            sessions.append(
-                {
-                    "id": record.get("id"),
-                    "timestamp": record.get("timestamp"),
-                    "mode": record.get("mode") or "classic",
-                    "topic": record.get("topic"),
-                    "turns": turns,
-                    "transcript": record.get("transcript"),
-                    "provider": record.get("provider"),
-                    "model": record.get("model"),
-                }
-            )
-        return sessions
+        return [_session_from_record({key: row[key] for key in row.keys()}) for row in rows]
+
+    def get(self, session_id: int | str) -> dict[str, Any] | None:
+        """Load one session by row id (the integer memory id)."""
+
+        self.initialize()
+        try:
+            numeric = int(session_id)
+        except (TypeError, ValueError):
+            return None
+        try:
+            with self._session() as conn:
+                row = conn.execute(
+                    "SELECT * FROM sessions WHERE id = ?", (numeric,)
+                ).fetchone()
+        except sqlite3.Error as exc:
+            raise StorageError(f"Cannot read session {session_id}: {exc}") from exc
+        return _session_from_record({key: row[key] for key in row.keys()}) if row else None
+
+    def append_turns(
+        self,
+        session_id: int | str,
+        *,
+        turns: Sequence[Mapping[str, Any]],
+        transcript: str = "",
+        timestamp: str | None = None,
+    ) -> None:
+        """Rewrite a thread's turns and transcript after a follow-up pass."""
+
+        self.initialize()
+        try:
+            numeric = int(session_id)
+        except (TypeError, ValueError) as exc:
+            raise StorageError(f"Invalid session id: {session_id}") from exc
+        normalized = [turn for turn in (_normalize_turn(t) for t in turns) if turn]
+        values: dict[str, Any] = {
+            "turns": json.dumps(normalized, ensure_ascii=False),
+            "transcript": transcript,
+        }
+        if timestamp:
+            values["timestamp"] = timestamp
+        for turn in normalized:
+            column = turn["persona"]
+            if column in LEGACY_PERSONA_COLUMNS and column not in values:
+                values[column] = turn["content"]
+        try:
+            with self._session() as conn:
+                self._migrate(conn)
+                columns = self._columns(conn)
+                usable = {key: value for key, value in values.items() if key in columns}
+                assignments = ", ".join(f"{key} = ?" for key in usable)
+                conn.execute(
+                    f"UPDATE sessions SET {assignments} WHERE id = ?",
+                    (*usable.values(), numeric),
+                )
+                conn.commit()
+        except sqlite3.Error as exc:
+            raise StorageError(f"Cannot append to session {session_id}: {exc}") from exc
 
     def history_text(self, limit: int = 5) -> str:
         sessions = self.recent(limit=limit)

@@ -18,7 +18,8 @@ import uuid
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Mapping
+from pathlib import Path
+from typing import Any, Iterable, Mapping
 from urllib.parse import parse_qs, unquote, urlparse
 
 from . import __version__
@@ -26,10 +27,24 @@ from .config import HotseatConfig, load_config
 from .personas import MODES, get_persona_set, list_modes
 from .providers import available_providers
 from .runtime import HotseatRuntime, merge_overrides
+from .scouts_feed import ScoutFeed
 from .storage import SessionStore, StorageError
 
 MAX_BODY_BYTES = 1_000_000
 LOOPBACK = {"127.0.0.1", "localhost", "::1"}
+STATIC_FILES = {
+    "index.html": "text/html; charset=utf-8",
+    "style.css": "text/css; charset=utf-8",
+    "app.js": "text/javascript; charset=utf-8",
+}
+
+
+def _string_list(value: Any) -> tuple[str, ...]:
+    if isinstance(value, str):
+        return tuple(item.strip() for item in value.split(",") if item.strip())
+    if isinstance(value, (list, tuple)):
+        return tuple(str(item).strip() for item in value if str(item).strip())
+    return ()
 
 
 @dataclass
@@ -45,6 +60,7 @@ class SessionJob:
     done: threading.Event = field(default_factory=threading.Event)
     result: dict[str, Any] | None = None
     error: str | None = None
+    scouts: dict[str, Any] | None = None
     lock: threading.Lock = field(default_factory=threading.Lock)
 
     def emit(self, event: dict[str, Any]) -> None:
@@ -54,11 +70,13 @@ class SessionJob:
         for subscriber in subscribers:
             subscriber.put(event)
 
-    def subscribe(self) -> tuple[list[dict[str, Any]], queue.Queue[dict[str, Any] | None]]:
+    def subscribe(
+        self, since: int = 0
+    ) -> tuple[list[dict[str, Any]], queue.Queue[dict[str, Any] | None]]:
         subscriber: queue.Queue[dict[str, Any] | None] = queue.Queue()
         with self.lock:
             self.subscribers.append(subscriber)
-            snapshot = list(self.events)
+            snapshot = list(self.events[max(0, since) :])
         return snapshot, subscriber
 
     def unsubscribe(self, subscriber: queue.Queue[dict[str, Any] | None]) -> None:
@@ -74,6 +92,15 @@ class SessionJob:
         for subscriber in subscribers:
             subscriber.put(None)
 
+    def reopen(self) -> None:
+        """Re-arm a finished job for one threaded follow-up pass."""
+
+        with self.lock:
+            self.done.clear()
+            self.error = None
+            self.injections = queue.Queue()
+        self.stop_event.clear()
+
     def public(self, *, since: int = 0) -> dict[str, Any]:
         with self.lock:
             events = list(self.events[max(0, since) :])
@@ -85,6 +112,7 @@ class SessionJob:
             "done": self.done.is_set(),
             "error": self.error,
             "result": self.result,
+            "scouts": self.scouts,
             "events": events,
         }
 
@@ -100,6 +128,8 @@ class Bridge:
         store: SessionStore | None = None,
         token: str | None = None,
         allowed_origins: tuple[str, ...] = (),
+        scout_feed: ScoutFeed | None = None,
+        web_dir: str | Path | None = None,
     ) -> None:
         self.config = config or load_config()
         self.store = store or SessionStore(self.config.db_path, self.config.session_log)
@@ -108,6 +138,14 @@ class Bridge:
         self.allowed_origins = tuple(item for item in allowed_origins if item)
         self.jobs: dict[str, SessionJob] = {}
         self.lock = threading.Lock()
+        self.scout_feed = scout_feed or ScoutFeed()
+        self.scouts_lock = threading.Lock()
+        self.last_scouts: dict[str, Any] | None = None
+        self.web_dir = (
+            Path(web_dir).expanduser().resolve()
+            if web_dir is not None
+            else Path(__file__).resolve().parent.parent / "web"
+        )
         self.persona_overrides: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
 
     # ── sessions ──────────────────────────────────────────────────────────────
@@ -124,6 +162,7 @@ class Bridge:
         sampling: Mapping[str, Any] | None = None,
         options: Mapping[str, Any] | None = None,
         persona_overrides: Mapping[str, Any] | None = None,
+        scout_context: Any = None,
     ) -> SessionJob:
         topic = (topic or "").strip()
         if not topic:
@@ -137,6 +176,28 @@ class Bridge:
         )
         with self.lock:
             self.jobs[job.id] = job
+
+        merged_options = dict(options or {})
+        if isinstance(scout_context, str) and scout_context.strip():
+            merged_options["scout_context"] = scout_context.strip()
+        elif isinstance(scout_context, Mapping) or scout_context is True:
+            request = scout_context if isinstance(scout_context, Mapping) else {}
+            try:
+                report = self.scout_feed.collect(
+                    topic,
+                    live=bool(request.get("live", True)),
+                    urls=_string_list(request.get("urls")),
+                    pricing_urls=_string_list(request.get("pricing_urls")),
+                )
+            except Exception:  # scouting is best-effort; never block the session
+                report = None
+            if report is not None:
+                self._remember_scouts(report.to_dict())
+                job.scouts = report.to_dict()
+                prompt = report.to_prompt()
+                if prompt:
+                    merged_options["scout_context"] = prompt
+        options = merged_options or None
 
         overrides = merge_overrides(
             self.persona_overrides.get((persona_set.mode, persona_set.variant or ""), {}),
@@ -179,6 +240,74 @@ class Bridge:
     def get_job(self, session_id: str) -> SessionJob | None:
         with self.lock:
             return self.jobs.get(session_id)
+
+    def _remember_scouts(self, payload: dict[str, Any]) -> None:
+        with self.scouts_lock:
+            self.last_scouts = payload
+
+    def refresh_scouts(
+        self,
+        seed: str = "",
+        *,
+        live: bool = True,
+        urls: Iterable[str] | None = None,
+        pricing_urls: Iterable[str] | None = None,
+    ) -> dict[str, Any]:
+        """Collect a fresh report and make it the latest one the UI can read."""
+
+        report = self.scout_feed.collect(
+            seed, live=live, urls=urls, pricing_urls=pricing_urls
+        )
+        payload = report.to_dict()
+        self._remember_scouts(payload)
+        return payload
+
+    def latest_scouts(self) -> dict[str, Any] | None:
+        with self.scouts_lock:
+            return self.last_scouts
+
+    def continue_session(self, session_id: str, message: str) -> SessionJob:
+        """Run a threaded follow-up on a finished, persisted session."""
+
+        job = self.get_job(session_id)
+        if job is None:
+            raise KeyError(session_id)
+        if not job.done.is_set():
+            raise ValueError("Session is still running; use /inject while it runs.")
+        if not job.result or not job.result.get("memory_id"):
+            raise ValueError("Session was not saved, so it cannot be continued.")
+        text = (message or "").strip()
+        if not text:
+            raise ValueError("A follow-up message is required.")
+        memory_id = job.result["memory_id"]
+        job.reopen()
+
+        def injection() -> str | None:
+            try:
+                return job.injections.get_nowait()
+            except queue.Empty:
+                return None
+
+        def run() -> None:
+            try:
+                result = self.runtime.continue_session(
+                    job.id,
+                    text,
+                    memory_id=memory_id,
+                    emit=job.emit,
+                    stop_event=job.stop_event,
+                    injection=injection,
+                )
+                job.result = result.public()
+            except Exception as exc:  # reported to the client, never raised in a thread
+                job.error = str(exc)
+            finally:
+                job.finish()
+
+        threading.Thread(
+            target=run, name=f"hotseat-followup-{job.id}", daemon=True
+        ).start()
+        return job
 
     def inject(self, session_id: str, message: str) -> None:
         job = self.get_job(session_id)
@@ -292,6 +421,31 @@ class _Handler(BaseHTTPRequestHandler):
             provided = (query.get("token") or [""])[0]
         return provided == token
 
+    def _serve_static(self, path: str) -> bool:
+        root = self.bridge.web_dir
+        if root is None or not root.is_dir():
+            return False
+        relative = "index.html" if path in ("", "/") else unquote(path.lstrip("/"))
+        if relative not in STATIC_FILES:
+            return False
+        candidate = (root / relative).resolve()
+        if root not in candidate.parents or not candidate.is_file():
+            return False
+        try:
+            body = candidate.read_bytes()
+        except OSError:
+            return False
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", STATIC_FILES[relative])
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            return True
+        return True
+
     def _send_json(
         self, status: int, payload: Any, *, headers: Mapping[str, str] | None = None
     ) -> None:
@@ -343,6 +497,8 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
+        if self._serve_static(parsed.path):
+            return
         if not self._authorized(query):
             self._error(HTTPStatus.UNAUTHORIZED, "Missing or invalid bearer token.")
             return
@@ -355,6 +511,11 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(HTTPStatus.OK, {"modes": self.bridge.modes()})
             elif parts == ["providers"]:
                 self._send_json(HTTPStatus.OK, {"providers": self.bridge.providers()})
+            elif parts == ["scouts", "latest"]:
+                self._send_json(
+                    HTTPStatus.OK,
+                    {"report": self.bridge.latest_scouts(), "next": "/scouts/refresh"},
+                )
             elif parts == ["personas"]:
                 mode = (query.get("mode") or ["classic"])[0]
                 variant = (query.get("variant") or [None])[0]
@@ -384,7 +545,11 @@ class _Handler(BaseHTTPRequestHandler):
                 if job is None:
                     self._error(HTTPStatus.NOT_FOUND, "Unknown session.")
                     return
-                self._stream_events(job)
+                try:
+                    since = max(0, int((query.get("since") or ["0"])[0]))
+                except ValueError:
+                    since = 0
+                self._stream_events(job, since=since)
             else:
                 self._error(HTTPStatus.NOT_FOUND, "Unknown endpoint.")
         except ValueError as exc:
@@ -429,6 +594,7 @@ class _Handler(BaseHTTPRequestHandler):
                     sampling=body.get("sampling") if isinstance(body.get("sampling"), Mapping) else None,
                     options=body.get("options") if isinstance(body.get("options"), Mapping) else None,
                     persona_overrides=body.get("personas") if isinstance(body.get("personas"), Mapping) else None,
+                    scout_context=body.get("scout_context"),
                 )
                 self._send_json(
                     HTTPStatus.ACCEPTED,
@@ -440,9 +606,20 @@ class _Handler(BaseHTTPRequestHandler):
                     },
                     headers={"Location": f"/sessions/{job.id}"},
                 )
+            elif parts == ["scouts", "refresh"]:
+                report = self.bridge.refresh_scouts(
+                    str(body.get("seed", "")),
+                    live=bool(body.get("live", True)),
+                    urls=_string_list(body.get("urls")),
+                    pricing_urls=_string_list(body.get("pricing_urls")),
+                )
+                self._send_json(HTTPStatus.OK, {"report": report})
             elif len(parts) == 3 and parts[0] == "sessions" and parts[2] == "inject":
                 self.bridge.inject(parts[1], str(body.get("message", "")))
                 self._send_json(HTTPStatus.ACCEPTED, {"queued": True})
+            elif len(parts) == 3 and parts[0] == "sessions" and parts[2] == "messages":
+                self.bridge.continue_session(parts[1], str(body.get("message", "")))
+                self._send_json(HTTPStatus.ACCEPTED, {"accepted": True})
             elif len(parts) == 3 and parts[0] == "sessions" and parts[2] == "stop":
                 self.bridge.stop(parts[1])
                 self._send_json(HTTPStatus.ACCEPTED, {"stopping": True})
@@ -479,8 +656,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._error(HTTPStatus.BAD_REQUEST, str(exc))
 
     # ── SSE ───────────────────────────────────────────────────────────────────
-    def _stream_events(self, job: SessionJob) -> None:
-        snapshot, subscriber = job.subscribe()
+    def _stream_events(self, job: SessionJob, *, since: int = 0) -> None:
+        snapshot, subscriber = job.subscribe(since=since)
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-store")

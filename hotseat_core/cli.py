@@ -15,6 +15,7 @@ from .config import HotseatConfig, load_config
 from .personas import MODES, get_persona_set, list_modes
 from .providers import ProviderError, available_providers
 from .runtime import HotseatRuntime
+from .scouts_feed import ScoutFeed
 from .storage import SessionStore, StorageError
 from .tuning import STYLE_PROFILES
 
@@ -40,6 +41,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--style", action="append", default=[], help="Style modifier (repeatable).")
     parser.add_argument("--statement", default="", help="v2: the volunteer's opening statement.")
     parser.add_argument("--constraint", action="append", default=[], help="Arena: constraint the rivals must respect (repeatable).")
+    parser.add_argument("--scout-feed", action="store_true", help="Inject live ChronoScouts/market evidence into the session.")
+    parser.add_argument("--scout-offline", action="store_true", help="With --scout-feed: use local ChronoScouts data only (no network).")
+    parser.add_argument("--scout-dir", default=None, help="ChronoScouts directory (default: CHRONOSCOUTS_DIR or auto).")
+    parser.add_argument("--scout-url", action="append", default=[], help="Extra RSS/Atom feed URL for live scouts (repeatable).")
+    parser.add_argument("--pricing-url", action="append", default=[], help="Competitor pricing page URL for live scouts (repeatable).")
     parser.add_argument("--system-directive", default="", help="Extra instruction for every persona.")
     parser.add_argument("--json-stream", action="store_true", help="Emit NDJSON events on stdout.")
     parser.add_argument("--no-save", action="store_true", help="Do not write the session to memory.")
@@ -145,6 +151,23 @@ def _run_once(args: argparse.Namespace, config: HotseatConfig, topic: str) -> in
         options["statement"] = args.statement
     if args.constraint:
         options["constraints"] = "; ".join(args.constraint)
+    if args.scout_feed:
+        feed = ScoutFeed(root=args.scout_dir)
+        report = feed.collect(
+            topic,
+            live=not args.scout_offline,
+            urls=args.scout_url,
+            pricing_urls=args.pricing_url,
+        )
+        prompt = report.to_prompt()
+        if prompt:
+            options["scout_context"] = prompt
+        print(
+            f"\n[scouts] {len(report.signals)} signals, {len(report.prices)} price points "
+            f"from {', '.join(report.sources) or 'no sources'}"
+            + (f" ({len(report.errors)} source errors)" if report.errors else ""),
+            file=sys.stderr,
+        )
     try:
         result = runtime.run_session(
             args.mode or "classic",
@@ -237,7 +260,12 @@ def _main(argv: list[str] | None = None) -> int:
         return EXIT_OK
     if args.serve:
         try:
-            bridge = Bridge(config, token=args.token, allowed_origins=tuple(args.allow_origin))
+            bridge = Bridge(
+                config,
+                token=args.token,
+                allowed_origins=tuple(args.allow_origin),
+                scout_feed=ScoutFeed(root=args.scout_dir),
+            )
             server = serve(
                 bridge,
                 host=args.host or config.bridge_host,

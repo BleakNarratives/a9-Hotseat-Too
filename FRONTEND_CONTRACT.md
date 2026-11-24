@@ -1,6 +1,6 @@
 # Hotseat Bridge — Frontend Contract
 
-**Version:** 0.2 · **Transport:** HTTP/1.1 + Server-Sent Events (SSE) + NDJSON
+**Version:** 0.3 · **Transport:** HTTP/1.1 + Server-Sent Events (SSE) + NDJSON
 **Implementation:** [`hotseat_core/bridge.py`](hotseat_core/bridge.py) · **No third-party dependencies**
 
 The bridge lets a CLI, desktop app, or web UI drive a Hotseat session without
@@ -14,8 +14,14 @@ structured event.
 ```bash
 python -m hotseat_core --serve                 # http://127.0.0.1:8765
 python -m hotseat_core --serve --port 9000
-python -m hotseat_core --serve --provider demo # no keys, no models, canned replies
+python -m hotseat_core --serve --provider demo # no keys, no models, demo replies
 ```
+
+`--serve` also hosts the built-in live console at `/`: `web/index.html`,
+`web/style.css`, and `web/app.js`. It is not a canned page; it reads `/modes`,
+`/providers`, `/scouts/latest`, starts sessions through `POST /sessions`, and
+streams the session through SSE. Only those three files are served — there is no
+filesystem or directory endpoint.
 
 The same contract is available as a streaming CLI:
 
@@ -36,7 +42,9 @@ stdout; human status goes to stderr.
 | CORS | off | `--allow-origin http://localhost:3000` (repeatable, exact match). |
 
 There is **no filesystem endpoint**. The legacy v3 `/list/{dir}` surface was not
-carried forward. Bind to loopback, or set a token and an exact CORS origin.
+carried forward. The only static routes are the three web assets above. Bind to
+loopback, or set a token and an exact CORS origin. Static assets are public so
+the page can load; API calls still require the token (the UI reads `?token=`).
 
 All JSON responses send `Cache-Control: no-store`. Unknown routes return 404;
 unknown sessions 404; invalid bodies 400; missing/invalid token 401.
@@ -126,6 +134,46 @@ curl -XPUT 'localhost:8765/personas/classic/audrey' \
 Returns `{ "persona": { ...full persona, including "system" } }`.
 Unknown mode/persona → 404. Unknown field values or `max_tokens <= 0` → 400.
 
+### `GET /scouts/latest`
+
+Returns the most recent ChronoScouts/market report collected by this bridge
+process, or `null` if no sweep has run.
+
+```json
+{
+  "report": {
+    "generated_at": "2026-11-24T20:43:49-06:00",
+    "root": "/home/me/ChronoScouts",
+    "sources": ["chronoscouts:/home/me/ChronoScouts", "hn", "pricing:acme.test"],
+    "errors": [],
+    "counts": { "signals": 8, "prices": 3 },
+    "signals": [
+      { "source": "hn", "title": "…", "detail": "…", "url": "…", "published_at": "…", "kind": "pain", "weight": 0.87 }
+    ],
+    "prices": [
+      { "competitor": "acme.test", "product": "Acme Pricing", "price": "$29/mo", "currency": null, "url": "…", "observed_at": "…", "weight": 1.0 }
+    ]
+  },
+  "next": "/scouts/refresh"
+}
+```
+
+Local sources are `signals_export.json` and `scout_rag_store.db` (opened
+read-only) under `CHRONOSCOUTS_DIR`, or `dist/` beneath it. Live sources are the
+seed query on Hacker News, RSS URLs, and competitor pricing pages. Weights decay
+with age; the report is timestamped data, never instructions.
+
+### `POST /scouts/refresh`
+
+Collects a fresh report and stores it as `/scouts/latest`.
+
+```json
+{ "seed": "roofing quote tool", "live": true, "urls": ["https://example.test/feed.xml"], "pricing_urls": ["https://acme.test/pricing"] }
+```
+
+`live` defaults to `true`. Set `false` for local ChronoScouts data only. Returns
+`{ "report": { … } }`.
+
 ### `GET /history?limit=10`
 
 Reads SQLite memory, newest first. `limit` is clamped to 1–100.
@@ -170,12 +218,23 @@ Starts a session in a background thread. Returns immediately.
     "statement": "v2 only: the volunteer's opening statement",
     "constraints": "arena only: budget $0, one weekend"
   },
-  "personas": { "fixer": { "model": "tinyllama:latest" } }
+  "personas": { "fixer": { "model": "tinyllama:latest" } },
+  "scout_context": { "live": true, "urls": [], "pricing_urls": [] }
 }
 ```
 
 Only `mode` and `topic` are required. `mode` is `classic`, `v2`, `v3`, `bmad`, or
-`arena`. Response `202`:
+`arena`.
+
+`scout_context` is optional:
+
+* `true` — collect a live sweep for the topic before the first prompt.
+* `{ "live": false, "urls": [...], "pricing_urls": [...] }` — control sources.
+* a string — inject that exact evidence into the arena prompts.
+
+The collected report is attached to the session as `scouts` and also becomes
+`/scouts/latest`. Arena injects the timestamped evidence into the Producer,
+Critic, Foreman, Architect, and Coroner prompts. Response `202`:
 
 ```json
 {
@@ -200,6 +259,7 @@ Polling fallback for clients without SSE. `since` is an event index.
   "topic": "hire or contract?",
   "done": true,
   "error": null,
+  "scouts": { "generated_at": "…", "counts": { "signals": 8, "prices": 3 }, "signals": [], "prices": [], "sources": [], "errors": [] },
   "result": {
     "session_id": "2c5b97511055",
     "memory_id": 43,
@@ -222,11 +282,11 @@ Polling fallback for clients without SSE. `since` is an event index.
 `result` is `null` until `done` is true. `error` is a string if the provider or
 engine failed; partial turns remain in `events`.
 
-### `GET /sessions/{id}/events` — SSE
+### `GET /sessions/{id}/events?since=0` — SSE
 
-`Content-Type: text/event-stream`. The server replays all events produced so far,
-then streams live events, sends `: ping` comments every 15 s, and closes after
-`session_end`. Each message is:
+`Content-Type: text/event-stream`. `since` is an event index. The server replays
+events from that index, then streams live events, sends `: ping` comments every
+15 s, and closes after `session_end`. Each message is:
 
 ```
 event: persona_turn
@@ -246,6 +306,22 @@ never interrupt an in-flight model call.
 ```
 
 `202 { "queued": true }`; 400 if empty; 404 unknown; 400 if the session finished.
+
+### `POST /sessions/{id}/messages`
+
+Run one threaded follow-up against a finished, persisted session. The closer
+persona answers with the prior transcript in view, and the stored row is updated
+with the new turn and transcript (same session id and memory id).
+
+```json
+{ "message": "Tighten the brief and defend the price." }
+```
+
+`202 { "accepted": true }`; 400 if the session is still running, was not saved,
+or the message is empty; 404 unknown. Reconnect to the SSE endpoint with
+`?since=<events already received>` to stream the follow-up. The job emits
+`operator_message`, `iteration_start`, then normal turn events and a final
+`session_end` with `"follow_up": true` and `"iteration": 2`.
 
 ### `POST /sessions/{id}/stop`
 
@@ -269,7 +345,9 @@ Every event has `type`. All events except `token_chunk` are also retrievable fro
 | `persona_turn` | `persona`, `speaker`, `content`, `round`, `model` — completed turn |
 | `memory_saved` | `session_id`, `path`, `memory_id` |
 | `error` | `session_id`, `message` — the session then ends; turns already produced are kept |
-| `session_end` | `session_id`, `timestamp`, `mode`, `variant`, `topic`, `provider`, `model`, `memory_id`, `turns[]`, `transcript`, `stopped` |
+| `operator_message` | `session_id`, `timestamp`, `message` — a threaded follow-up was accepted |
+| `iteration_start` | `session_id`, `timestamp`, `iteration`, `parent_turns` — follow-up pass begins |
+| `session_end` | `session_id`, `timestamp`, `mode`, `variant`, `topic`, `provider`, `model`, `memory_id`, `turns[]`, `transcript`, `stopped`; follow-ups add `follow_up` and `iteration` |
 
 `turns[]` entries are the same object as `persona_turn` without `type`.
 

@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en" data-theme="terminal">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>THE HOT SEAT — ChronoScouts Arena</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body data-mode="arena">
+  <div class="grain" aria-hidden="true"></div>
+  <div class="scanlines" aria-hidden="true"></div>
+
+  <header class="masthead">
+    <div class="brand">
+      <p class="eyebrow">CHRONOSCOUTS // LIVE MARKET INTELLIGENCE // EST. 1974</p>
+      <h1>THE <span>HOT</span> SEAT</h1>
+      <p class="tagline">Four contenders. One market. No safe answers.</p>
+    </div>
+    <div class="masthead-right">
+      <div class="status-stack">
+        <span class="led" id="conn-led" data-state="idle"></span>
+        <span id="conn-label">STANDING BY</span>
+      </div>
+      <button class="switch" id="theme-toggle" type="button" aria-pressed="false">
+        <span class="switch-dot"></span> SWITCHBOARD
+      </button>
+    </div>
+  </header>
+
+  <section class="scout-wire" aria-label="ChronoScouts live wire">
+    <div class="wire-head">
+      <div class="wire-title">
+        <span class="wire-kicker">INCOMING</span>
+        <h2>SCOUT WIRE</h2>
+        <span class="wire-meta" id="scout-meta">no sweep on file</span>
+      </div>
+      <div class="wire-actions">
+        <button class="btn ghost" id="scout-refresh" type="button">PULL FRESH INTEL</button>
+        <button class="btn ghost" id="scout-drawer-toggle" type="button" aria-expanded="false" aria-controls="scout-drawer">OPEN DRAWER</button>
+      </div>
+    </div>
+    <div class="ticker" id="scout-ticker" aria-live="polite">
+      <div class="ticker-track" id="ticker-track">
+        <span class="ticker-empty">NO SCOUT SWEEP YET // pull fresh intel or launch with scouts attached.</span>
+      </div>
+    </div>
+    <div class="market-strip" id="market-strip" aria-label="Extracted competitor price points">
+      <span class="market-label">MARKET BENCHMARKS</span>
+      <span class="market-empty">awaiting price points</span>
+    </div>
+    <div class="drawer" id="scout-drawer" hidden>
+      <div class="drawer-grid">
+        <div>
+          <h3>LIVE SIGNALS</h3>
+          <div id="scout-signals" class="drawer-list"><p class="muted">Nothing collected yet.</p></div>
+        </div>
+        <div>
+          <h3>COMPETITOR PRICING</h3>
+          <div id="scout-prices" class="drawer-list"><p class="muted">Nothing collected yet.</p></div>
+          <h3 class="drawer-sub">SOURCE HEALTH</h3>
+          <div id="scout-health" class="drawer-list"><p class="muted">No sweep has run.</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <main class="console">
+    <aside class="controls" aria-label="Session controls">
+      <div class="panel-heading"><span class="index">01</span><h2>SET THE TABLE</h2></div>
+
+      <label class="field">
+        <span class="field-label">MODE</span>
+        <select id="mode-select"></select>
+      </label>
+      <label class="field">
+        <span class="field-label">PROVIDER</span>
+        <select id="provider-select"></select>
+        <span class="hint" id="provider-hint">auto resolves local or configured credentials</span>
+      </label>
+      <label class="field">
+        <span class="field-label">THE SEED</span>
+        <textarea id="seed-input" rows="5" placeholder="Pitch the idea, decision, or beautiful mess. Be specific. The room will not be."></textarea>
+      </label>
+      <div class="field">
+        <span class="field-label">CONSTRAINT TAGS</span>
+        <input id="constraint-input" type="text" placeholder="budget $0, ship in 2 weeks, no ads">
+        <span class="hint">Comma-separated. Rivals must respect these.</span>
+      </div>
+      <div class="mic-row">
+        <button class="btn mic" id="mic-button" type="button" aria-pressed="false" title="Push to talk (Web Speech API)">
+          <span class="mic-dot"></span> PUSH TO TALK
+        </button>
+        <span class="mic-status" id="mic-status">or type it</span>
+      </div>
+      <label class="check">
+        <input id="attach-scouts" type="checkbox" checked>
+        <span>Attach a live scout sweep to this session</span>
+      </label>
+      <button class="btn launch" id="launch-button" type="button">CONVENE THE ROOM</button>
+      <p class="session-line" id="session-line">SESSION // none</p>
+      <p class="error-line" id="error-line" role="alert" hidden></p>
+    </aside>
+
+    <section class="stage" aria-label="Arena floor">
+      <div class="stage-head">
+        <div><span class="index">02</span><h2 id="stage-title">ARENA FLOOR</h2></div>
+        <span class="stage-status" id="stage-status">IDLE</span>
+      </div>
+
+      <div class="bracket" id="bracket">
+        <article class="contender empty" data-slot="0"><span class="contender-no">CONTENDER 00</span><h3>AWAITING</h3><p>The seed takes the first chair. Three rivals are built on the spot.</p></article>
+        <article class="contender empty" data-slot="1"><span class="contender-no">CONTENDER 01</span><h3>AWAITING</h3><p>The cheaper model is still in the hallway.</p></article>
+        <article class="contender empty" data-slot="2"><span class="contender-no">CONTENDER 02</span><h3>AWAITING</h3><p>The premium model is polishing its invoice.</p></article>
+        <article class="contender empty" data-slot="3"><span class="contender-no">CONTENDER 03</span><h3>AWAITING</h3><p>The niche wedge is hiding behind a trade magazine.</p></article>
+      </div>
+
+      <div class="memo-grid">
+        <article class="memo critic">
+          <div class="memo-head"><span class="index">03</span><h3>CROSS-EXAMINATION</h3></div>
+          <div class="memo-body" id="critic-body"><p class="muted">The critic is sharpening something. It is not a compliment.</p></div>
+        </article>
+        <article class="memo foreman">
+          <div class="memo-head"><span class="index">04</span><h3>THE FOREMAN'S CALL</h3></div>
+          <div class="memo-body" id="foreman-body"><p class="muted">Nobody has been eliminated yet. Give it a minute.</p></div>
+        </article>
+      </div>
+
+      <div class="memo-grid">
+        <article class="memo architect">
+          <div class="memo-head"><span class="index">05</span><h3>BUILD BRIEF</h3></div>
+          <div class="memo-body" id="architect-body"><p class="muted">The survivor's paperwork appears here.</p></div>
+        </article>
+        <article class="memo coroner">
+          <div class="memo-head"><span class="index">06</span><h3>AUTOPSY</h3></div>
+          <div class="memo-body" id="coroner-body"><p class="muted">Cause of death: pending.</p></div>
+        </article>
+      </div>
+
+      <article class="transcript">
+        <div class="memo-head"><span class="index">07</span><h3>FLOOR TRANSCRIPT</h3><span class="live-flag" id="live-flag" hidden>LIVE</span></div>
+        <div class="turns" id="turns" aria-live="polite">
+          <p class="muted">No session on the floor. Set the table and convene the room.</p>
+        </div>
+      </article>
+
+      <form class="followup" id="followup-form">
+        <label class="field">
+          <span class="field-label">THREADED FOLLOW-UP // ACTIVE SESSION</span>
+          <input id="followup-input" type="text" placeholder="Ask the room to revise the brief, defend the verdict, or go one level deeper..." autocomplete="off" disabled>
+        </label>
+        <button class="btn followup-btn" id="followup-button" type="submit" disabled>PUSH BACK</button>
+      </form>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>THE HOT SEAT // LOCAL-FIRST AI ARENA</span>
+    <span>EVIDENCE IS TIMESTAMPED. OPINIONS ARE NOT.</span>
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -130,15 +130,24 @@ Defaults are 1–1.5B models on purpose — see
 
 ### Cloud
 
-Keys come from the environment or `~/.concierge/vault.json` via
-[`vault_loader.py`](vault_loader.py). Nothing is hardcoded, and no key is read for
-a provider you did not select.
+Keys resolve automatically from the environment, a repo-root `.env`, or
+`~/.concierge/vault.json` via
+[`hotseat_core/vault_loader.py`](hotseat_core/vault_loader.py) — no exports or
+CLI prefixes required. The vault is searched recursively, provider/key matching
+is case-insensitive, and aliases such as `OPENROUTER_KEY` work.
 
 ```bash
-export OPENROUTER_API_KEY="..."
-python -m hotseat_core --provider openrouter --mode v2 "my idea" \
-  --statement "four weeks, no budget."
+# ~/.concierge/vault.json can be nested in any of these shapes:
+# {"keys": {"OPENROUTER_KEY": "..."}, "mistral": {"api_key": "..."}}
+# {"providers": {"anthropic": {"token": "..."}}}
+# {"secrets": [{"name": "GROQ_API_KEY", "value": "..."}]}
+
+python3 -m hotseat_core --provider openrouter --mode arena "my idea"
+python3 -m hotseat_core --provider mistral --mode bmad "the thing I want to build"
 ```
+
+`.env` is ignored by Git. Nothing is hardcoded, and no key is read for a provider
+you did not select.
 
 | Provider | Notes |
 | :--- | :--- |
@@ -147,6 +156,49 @@ python -m hotseat_core --provider openrouter --mode v2 "my idea" \
 | `9router`, `ai_gateway` | Local OpenAI-compatible routers |
 | `openrouter`, `anthropic`, `mistral`, `cerebras`, `groq` | Cloud; env or vault |
 | `demo` | Offline canned replies for frontends, docs, and tests |
+
+## The live arena console
+
+`--serve` hosts a zero-dependency retro terminal-arena UI at
+**http://127.0.0.1:8765** — no static demo page, no build step:
+
+```bash
+python3 -m hotseat_core --serve --provider demo
+# open http://127.0.0.1:8765
+```
+
+The console is wired to the bridge contract: mode and provider selectors, seed
+prompt and constraint tags, push-to-talk dictation (Web Speech API with a text
+fallback), a live four-contender bracket, critic feed, Foreman callout, build
+brief, Coroner autopsy, and threaded follow-ups against the active session. It
+reads the real time/token/persona event stream over SSE and reconnects with an
+event offset instead of replaying duplicates.
+
+**Scout Wire** runs across the top: live ChronoScouts signals and extracted
+competitor price points, with a drawer for source health and a **Pull fresh
+intel** button. The FreeBuff-purple **Switchboard** theme is one click away from
+the maroon terminal theme.
+
+## Live ChronoScouts & market intel
+
+Every arena run can carry real, timestamped market evidence into the Producer,
+Critic, Foreman, Architect, and Coroner prompts:
+
+```bash
+# Local ChronoScouts export (dist/signals_export.json or scout_rag_store.db)
+python3 -m hotseat_core --mode arena --scout-feed --scout-offline "my idea"
+
+# Local + live Hacker News, RSS, and pricing scouts
+CHRONOSCOUTS_DIR=~/ChronoScouts python3 -m hotseat_core --mode arena \
+  --scout-feed "my idea" \
+  --scout-url "https://example.com/feed.xml" \
+  --pricing-url "https://competitor.example/pricing"
+```
+
+Local SQLite is opened with `?mode=ro`; nothing is written back. Signals carry a
+temporal-decay weight (`0.5 ** (age_days / half_life)`). Live sources are
+best-effort: a blocked feed is reported in the Scout Wire drawer, never allowed to
+kill the session. `HOTSEAT_SCOUT_RSS` and `HOTSEAT_PRICING_URLS` add defaults.
 
 ## Bring your own frontend
 
@@ -158,12 +210,14 @@ curl -s -XPOST localhost:8765/sessions \
   -H 'Content-Type: application/json' \
   -d '{"mode":"bmad","topic":"ship it or bin it?"}'
 curl -N localhost:8765/sessions/<session_id>/events
+curl -s localhost:8765/scouts/latest
 ```
 
-Modes, personas, providers, and history are queryable; personas are editable for
-the running process; operator notes can be injected between turns; sessions can
-be stopped. Events: `session_start`, `status`, `token_chunk`, `persona_turn`,
-`memory_saved`, `error`, `session_end`.
+Modes, personas, providers, history, and scout reports are queryable; personas
+are editable for the running process; operator notes can be injected between
+turns; sessions can be stopped or continued with a threaded follow-up. Events:
+`session_start`, `status`, `token_chunk`, `persona_turn`, `operator_message`,
+`iteration_start`, `memory_saved`, `error`, `session_end`.
 
 Full schemas and a working EventSource client:
 **[FRONTEND_CONTRACT.md](FRONTEND_CONTRACT.md)**.
@@ -178,17 +232,21 @@ python -m hotseat_core --mode bmad --json-stream "the thing" | jq -r 'select(.ty
 
 ```
 hotseat_core/
-  config.py      manifest + env resolution, no side effects on import
-  personas.py    casts, routing, limits, overrides
-  providers.py   urllib transport (OpenAI-compatible, Anthropic, Ollama) + demo
-  tuning.py      composable style directives and sampling; filler cleanup
-  storage.py     SQLite memory + JSONL log, in-place legacy migration
-  engines/       classic · v2_web · v3_agent · bmad
-  runtime.py     orchestration, events, persistence
-  cli.py         python -m hotseat_core
-  bridge.py      HTTP/SSE/NDJSON adapter
-tests/           33 tests, stdlib only
-docs/            extracted legacy context, decisions, and the unbuilt show concept
+  config.py       manifest + env resolution, no side effects on import
+  personas.py     casts, routing, limits, overrides
+  providers.py    urllib transport (OpenAI-compatible, Anthropic, Ollama) + demo
+  vault_loader.py recursive vault + repo .env credential resolution
+  scouts_feed.py  ChronoScouts JSON/SQLite + HN/RSS/pricing collectors
+  tuning.py       composable style directives and sampling; filler cleanup
+  storage.py      SQLite memory + JSONL log, in-place legacy migration
+  engines/        classic · v2_web · v3_agent · bmad · arena · followup
+  runtime.py      orchestration, events, persistence, threaded follow-ups
+  cli.py          python -m hotseat_core
+  bridge.py       HTTP/SSE/NDJSON adapter + static console serving
+web/              zero-dependency live terminal-arena console
+vault_loader.py   compatibility shim for older imports
+tests/            48 tests, stdlib only
+docs/             extracted legacy context, decisions, and the unbuilt show concept
 ```
 
 That is the whole tracked project. The old trees were read, their durable ideas
@@ -225,10 +283,12 @@ model's policy — pick a model whose policy fits the job.
 python -m unittest discover -s tests -t . -v
 ```
 
-Covered: manifest/env precedence, persona resolution and overrides, legacy SQLite
-migration, JSONL and legacy logs, every engine including `bmad`, stop and
-injection semantics, NDJSON output, HTTP endpoints, token auth, and the
-loopback-binding guard. CI runs on Python 3.10–3.12.
+Covered: manifest/env precedence, nested vault and `.env` resolution, persona
+resolution and overrides, legacy SQLite migration, JSONL and legacy logs, every
+engine including `bmad` and `arena`, scout evidence injection, ChronoScouts
+JSON/SQLite ingestion, live fetcher parsing, threaded follow-ups, NDJSON output,
+HTTP endpoints, static console routes, token auth, and the loopback-binding
+guard. CI runs on Python 3.10–3.12.
 
 ## Termux
 
@@ -245,7 +305,8 @@ python -m hotseat_core --provider ollama --mode classic "my idea"
 - [x] Structured NDJSON + HTTP/SSE bridge and frontend contract
 - [x] Extract legacy context, remove the bulk
 - [x] Arena: seed vs three rivals, cross-exam, vote-off, brief, autopsy
-- [ ] FreeBuff / web frontend built against the contract
+- [x] Live retro web console, Scout Wire, threaded follow-ups
+- [x] Live ChronoScouts + market/pricing evidence in arena prompts
 - [ ] Full season: eight-character roster, user-built persona, escalation arc
 - [ ] Private and duo sessions, and the cross-remark engine
 - [ ] Optional embedding recall across sessions

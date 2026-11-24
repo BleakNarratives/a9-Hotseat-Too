@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Mapping
 
 from .config import HotseatConfig
-from .engines import Engine, Turn, build_engine, render_transcript
+from .engines import Engine, FollowUpEngine, Turn, build_engine, render_transcript
 from .personas import get_persona_set
 from .providers import ProviderClient
 from .storage import SessionStore, StorageError
@@ -229,6 +229,151 @@ class HotseatRuntime:
                 "model": result.model,
                 "memory_id": result.memory_id,
                 "turns": [turn.public() for turn in turns],
+                "transcript": transcript,
+                "stopped": bool(stop_event and stop_event.is_set()),
+            }
+        )
+        return result
+
+    def continue_session(
+        self,
+        session_id: str,
+        message: str,
+        *,
+        memory_id: int | str | None = None,
+        emit: EventEmitter | None = None,
+        stop_event: threading.Event | None = None,
+        injection: Callable[[], str | None] | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+    ) -> SessionResult:
+        """Append one operator follow-up to a finished, persisted session."""
+
+        emitter = emit or (lambda event: None)
+        instruction = (message or "").strip()
+        if not instruction:
+            raise ValueError("A follow-up message is required.")
+        stored = self.store.get(memory_id if memory_id is not None else session_id)
+        if not stored:
+            raise ValueError(
+                "Unknown session. Follow-ups require a persisted session with a memory id."
+            )
+
+        mode = str(stored.get("mode") or "classic")
+        variant = "panel" if mode == "v3" else None
+        persona_set = get_persona_set(
+            mode,
+            variant,
+            overrides=self.config.persona_overrides(mode, variant),
+        )
+        selected_provider = (
+            provider or stored.get("provider") or self.config.provider or "auto"
+        )
+        selected_model = model or stored.get("model") or self.config.model
+        client = self.client_factory(str(selected_provider), selected_model)
+        engine = FollowUpEngine(
+            persona_set,
+            client,
+            styles=self.config.styles,
+            model=selected_model,
+        )
+        prior = [
+            Turn(
+                persona=str(turn.get("persona") or "unknown"),
+                speaker=str(turn.get("speaker") or turn.get("persona") or "unknown"),
+                content=str(turn.get("content") or ""),
+                round=int(turn.get("round") or 0),
+                model=turn.get("model"),
+            )
+            for turn in stored.get("turns") or []
+        ]
+        engine.history = list(prior)
+        provider_name = getattr(client, "provider", selected_provider)
+        started = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+
+        emitter(
+            {
+                "type": "operator_message",
+                "session_id": session_id,
+                "timestamp": started,
+                "message": instruction,
+            }
+        )
+        emitter(
+            {
+                "type": "iteration_start",
+                "session_id": session_id,
+                "timestamp": started,
+                "iteration": 2,
+                "parent_turns": len(prior),
+            }
+        )
+
+        try:
+            turns = engine.run(
+                instruction, emit=emitter, stop_event=stop_event, injection=injection
+            )
+        except Exception as exc:
+            emitter({"type": "error", "session_id": session_id, "message": str(exc)})
+            raise
+
+        all_turns = prior + turns
+        transcript = render_transcript(
+            str(stored.get("topic") or "Untitled"),
+            all_turns,
+            f"{mode}:{persona_set.variant or 'default'}",
+        )
+        persisted_id = int(stored["id"]) if stored.get("id") is not None else None
+        try:
+            if persisted_id is None:
+                raise StorageError("The session has no memory id.")
+            self.store.append_turns(
+                persisted_id,
+                turns=[turn.public() for turn in all_turns],
+                transcript=transcript,
+            )
+            emitter(
+                {
+                    "type": "memory_saved",
+                    "session_id": session_id,
+                    "path": str(self.store.db_path),
+                    "memory_id": persisted_id,
+                }
+            )
+        except StorageError as exc:
+            emitter(
+                {
+                    "type": "error",
+                    "session_id": session_id,
+                    "message": f"Follow-up ran, but the thread was not saved: {exc}",
+                }
+            )
+
+        result = SessionResult(
+            mode=mode,
+            variant=persona_set.variant or "default",
+            topic=str(stored.get("topic") or "Untitled"),
+            turns=all_turns,
+            transcript=transcript,
+            session_id=session_id,
+            memory_id=persisted_id,
+            provider=str(provider_name),
+            model=selected_model,
+        )
+        emitter(
+            {
+                "type": "session_end",
+                "session_id": session_id,
+                "timestamp": started,
+                "mode": result.mode,
+                "variant": result.variant,
+                "topic": result.topic,
+                "provider": result.provider,
+                "model": result.model,
+                "memory_id": result.memory_id,
+                "iteration": 2,
+                "follow_up": True,
+                "turns": [turn.public() for turn in all_turns],
                 "transcript": transcript,
                 "stopped": bool(stop_event and stop_event.is_set()),
             }

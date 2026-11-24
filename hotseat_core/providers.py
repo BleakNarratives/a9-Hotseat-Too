@@ -185,7 +185,7 @@ def _get_secret(key: str, secret_loader: Callable[[str, str], str] | None = None
     try:
         if secret_loader is None:
             # Delayed import means missing vaults/keys never break module import.
-            from vault_loader import get_secret
+            from .vault_loader import get_secret
 
             secret_loader = get_secret
         return str(secret_loader(key, "") or "")

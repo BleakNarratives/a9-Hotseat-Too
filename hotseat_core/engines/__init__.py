@@ -9,6 +9,7 @@ from .arena import ArenaEngine
 from .base import Engine, Turn, TurnRequest, render_transcript
 from .bmad import BriefEngine
 from .classic import ClassicEngine
+from .followup import FollowUpEngine
 from .v2_web import DebateEngine
 from .v3_agent import PanelEngine, TribunalEngine
 
@@ -52,6 +53,7 @@ __all__ = [
     "ArenaEngine",
     "BriefEngine",
     "ClassicEngine",
+    "FollowUpEngine",
     "DebateEngine",
     "Engine",
     "PanelEngine",
