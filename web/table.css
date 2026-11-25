@@ -13,6 +13,9 @@
 
 * { box-sizing: border-box; }
 
+/* Author display rules outrank the UA rule for [hidden]; keep the attribute honest. */
+[hidden] { display: none !important; }
+
 html, body { height: 100%; }
 
 body {
