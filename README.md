@@ -340,6 +340,41 @@ pkg install python
 python -m hotseat_core --provider ollama --mode classic "my idea"
 ```
 
+## Deploy it for other people
+
+The bridge is one long-lived process serving its own UI, SSE, and API, with live
+sessions in memory and SQLite on local disk. That rules out serverless hosts:
+Vercel Functions cap a request at 300s on Hobby and give no shared memory or
+disk, and Netlify Functions are shorter still. Use a container host instead.
+
+**Render free web service** is the zero-card option: 512 MB / 0.1 CPU, one
+instance, a public `onrender.com` URL with TLS, custom domains included.
+
+1. Push this repo to GitHub.
+2. Render → **New → Blueprint** → select the repo. `render.yaml` creates the
+   service and sets `HOTSEAT_PROVIDER=demo`; it prompts once for
+   `HOTSEAT_TOKEN`. Use a long letters-and-digits passphrase — the token travels
+   in a query string, where `+`, `&`, `#` and `?` change its meaning.
+3. Share `https://<service>.onrender.com/?token=<passphrase>`. The console
+   forwards the token to its fetches and the EventSource; the static shell loads
+   without it, every API route needs it. Without `render.yaml`, create a Docker
+   web service and set the same two env vars by hand.
+
+`--provider demo` is canned output: safe to expose, costs nothing, and tests the
+flow rather than the model. For real answers, point the service at your own key
+(`HOTSEAT_PROVIDER=openrouter` plus `OPENROUTER_API_KEY`) and keep the token: it
+is a shared secret, and every session spends your budget. Cap the key at the
+provider, not in the app. Leave the UI provider selector on **AUTO**, which uses
+the server configuration.
+
+Known free-tier edges, all by design on Render: the service spins down after 15
+idle minutes and takes about a minute to wake, so a session left open can lose
+its in-memory job (the SQLite history survives); the filesystem is ephemeral, so
+`~/hotseat` resets on every deploy, restart, or spin-down; bandwidth is 5 GB a
+month. Upgrade the service to the $7/month plan for always-on without changing
+anything else. For a named always-on host with a credit card, Fly.io or a small
+VPS runs the same `Dockerfile` unchanged.
+
 ## Roadmap
 
 - [x] One package: classic, v2, v3 panel/tribunal, BMAD-lite, and Arena

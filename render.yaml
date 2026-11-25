@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: hotseat
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: oregon
+    autoDeployTrigger: commit
+    envVars:
+      - key: HOTSEAT_PROVIDER
+        value: demo
+      # Prompted once at Blueprint creation. Use letters and digits only: the
+      # token travels in a query string, where +, &, # and ? change its meaning.
+      - key: HOTSEAT_TOKEN
+        sync: false
