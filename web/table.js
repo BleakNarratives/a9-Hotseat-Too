@@ -20,6 +20,10 @@
   const programName = $("#program-name");
   const programList = $("#program-list");
   const caseHint = $("#case-hint");
+  const wire = $("#wire");
+  const wireCount = $("#wire-count");
+  const wireNote = $("#wire-note");
+  const wireList = $("#wire-list");
 
   const EVENT_TYPES = [
     "session_start",
@@ -160,6 +164,67 @@
     });
   }
 
+  // ── the wire ───────────────────────────────────────────────────────────────
+
+  wire.addEventListener("click", () => {
+    const open = !wire.classList.contains("open");
+    wire.classList.toggle("open", open);
+    wire.setAttribute("aria-expanded", String(open));
+  });
+
+  function resetWire() {
+    wire.hidden = true;
+    wire.classList.remove("open");
+    wire.setAttribute("aria-expanded", "false");
+    wireCount.textContent = "sweeping…";
+    wireNote.textContent = "scouts on the case";
+    wireList.textContent = "";
+  }
+
+  function timeLabel(value) {
+    try {
+      return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    } catch (error) {
+      return "just now";
+    }
+  }
+
+  function renderWire(scouts) {
+    wire.hidden = false;
+    wireList.textContent = "";
+    if (!scouts) {
+      wireCount.textContent = "no sweep";
+      wireNote.textContent = "the bridge returned no scout report";
+      return;
+    }
+    const counts = scouts.counts || {};
+    const signals = Array.isArray(scouts.signals) ? scouts.signals : [];
+    const anchors = Array.isArray(scouts.market_anchors) ? scouts.market_anchors : [];
+    const signalCount = counts.signals === undefined ? signals.length : counts.signals;
+    const priceCount =
+      counts.prices === undefined ? (Array.isArray(scouts.prices) ? scouts.prices.length : 0) : counts.prices;
+    wireCount.textContent =
+      signalCount + " signal" + (signalCount === 1 ? "" : "s") +
+      " · " + priceCount + " price" + (priceCount === 1 ? "" : "s");
+    wireNote.textContent = scouts.generated_at
+      ? "swept " + timeLabel(scouts.generated_at)
+      : "scouts on the case";
+
+    signals.slice(0, 3).forEach((signal) => {
+      wireList.appendChild(
+        el("span", "wire-item", "[" + (signal.source || "wire") + "] " + (signal.title || "untitled"))
+      );
+    });
+    anchors.slice(0, 3).forEach((anchor) => {
+      wireList.appendChild(
+        el("span", "wire-item", "PRICE " + (anchor.competitor || "market") + " — " + (anchor.price || "unknown"))
+      );
+    });
+    if (!wireList.childElementCount) {
+      wireList.appendChild(el("span", "wire-item", "The wire is quiet for this case."));
+    }
+  }
+
   async function castFor(entry) {
     const query =
       "?mode=" +
@@ -194,6 +259,7 @@
     stamp.hidden = true;
     renderCast(cast);
     renderProgram();
+    resetWire();
     note.textContent = entry.name + " is seated.";
   }
 
@@ -345,6 +411,10 @@
     });
     note.textContent = "seating the room…";
     renderProgram();
+    resetWire();
+    wire.hidden = false;
+    wireCount.textContent = "sweeping…";
+    wireNote.textContent = "scouts on the case";
     room.dataset.phase = "live";
     try {
       const created = await api("/sessions", {
@@ -353,9 +423,18 @@
           mode: state.format.mode,
           variant: state.format.variant || undefined,
           topic: topic,
+          scout_context: {
+            live: state.format.mode === "arena" || state.format.mode === "bmad",
+          },
         }),
       });
       state.sessionId = created.session_id;
+      try {
+        const snapshot = await api("/sessions/" + state.sessionId);
+        renderWire(snapshot.scouts);
+      } catch (error) {
+        renderWire(null);
+      }
       openStream();
     } catch (error) {
       fail(error.message);
@@ -549,6 +628,7 @@
     stamp.hidden = true;
     strip.hidden = true;
     followForm.hidden = true;
+    resetWire();
     caseInput.value = "";
     caseHint.textContent = state.format.blurb;
     gavel.setAttribute("aria-label", "Stop the session");

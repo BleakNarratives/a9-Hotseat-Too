@@ -4,15 +4,17 @@ Provider credentials are resolved only when selection requires them. The module
 uses the standard library transport, so a local-first install does not need an
 extra HTTP package merely to import Hotseat.
 
-A ``demo`` provider is included for frontends, docs, and tests: it returns fixed,
-clearly labeled text without touching the network, so a UI can be built before
-any key exists.
+A ``demo`` provider is included for frontends, docs, and tests: it composes
+case-specific text from the pitch and any scout evidence in the prompt, never
+touches the network, and labels every reply, so a UI can be built before any key
+exists.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import socket
 import time
 from dataclasses import dataclass, field
@@ -89,112 +91,296 @@ PROVIDERS: dict[str, ProviderSpec] = {
 
 _CLOUD_ORDER = ("openrouter", "anthropic", "mistral", "cerebras", "groq")
 
-DEMO_LINES: tuple[tuple[str, str], ...] = (
-    (
-        "Dame Audrey",
-        "I see. You want the version where nobody has to test it. Right then: this plan assumes the hard part is the code, when it is the maintenance. Decide who owns it on a rainy Tuesday, or stop calling it a product.",
-    ),
-    (
-        "Claib",
-        "Actually, you're solving the visible problem. The thing underneath it is distribution — nobody can find the thing you built. Fix the front door before you add another room.",
-    ),
-    (
-        "Vertical AI",
-        "The idea is sound. The timeline is the story you tell yourself to avoid starting. Pick the smallest version and ship it this week.",
-    ),
-    (
-        "Skeptic",
-        "The claim rests on one unmeasured number: that people will keep coming back after week two. Nothing here tests retention, and the cost model ignores support. Start with the weakest point, not the demo.",
-    ),
-    (
-        "Volunteer",
-        "Fair hit on retention. It is also the cheapest thing to fix: run ten sessions and log who returns. If two do, the idea survives; if none do, we learned it for a weekend instead of a quarter.",
-    ),
-    (
-        "Marlowe",
-        "You already know what is wrong. You are here because you want someone to tell you it is not as bad as you think. It is. But you have handled worse. So — what are we actually doing about it?",
-    ),
-    (
-        "Priya",
-        "Strip out the feeling for a second. What is the behavior that keeps repeating? That is the loop. It breaks at the point where you commit before you have decided, and every other problem downstream is a symptom.",
-    ),
-    (
-        "Zero",
-        "You are not afraid of failing. You are afraid of finding out what you will do if you succeed. Sit with that one.",
-    ),
-    (
-        "The Adversary",
-        "This fails on ownership. Nobody in the plan is accountable for the boring middle, and the middle is where every version of this has died before.",
-    ),
-    (
-        "The Voice of Reason",
-        "The facts support a small test, not a launch. Two weeks of real use will tell you more than another month of planning.",
-    ),
-    (
-        "The Whistleblower",
-        "The thing nobody is saying: this is a feature, not a product, and everyone in the room already knows it. Say it now while it is still cheap.",
-    ),
-    (
-        "The Evangelist",
-        "It matters because it lets one person do work that used to require a team. The blind spot is that the same person is the buyer, the user, and the support line.",
-    ),
-    (
-        "The Fixer",
-        "1. Name one owner. 2. Ship the smallest version this week. 3. Log every session and review the log in fourteen days.",
-    ),
-    (
-        "You are the Producer",
-        "CONTENDER 0 — YOUR IDEA: the seed as pitched. Customer: solo builders. Price: $12/mo. Wedge: one command, local-first. First ten: your own timeline. Dies on: whether anyone wants a fourth note-taking tool.\nCONTENDER 1 — THE CHEAP ONE: one button, $0 + tips. Wedge: no setup. First ten: a Reddit thread. Dies on: no support model.\nCONTENDER 2 — THE PREMIUM ONE: done-for-you at $2,500/mo. Wedge: white glove. First ten: warm intros. Dies on: founder time.\nCONTENDER 3 — THE NICHE WEDGE: only roofing contractors, $99/mo. Wedge: pre-filled quotes. First ten: one trade group. Dies on: a narrow market that will not pay.",
-    ),
-    (
-        "You are the Critic",
-        "YOUR IDEA: the weakest assumption is that the user wants another tool. Cheap One: free has no support loop. Premium One: the founder is the product. Niche Wedge: distribution depends on a group you do not belong to. All four are missing evidence that anyone pays twice.",
-    ),
-    (
-        "You are the Foreman",
-        "Winner: THE NICHE WEDGE. Deciding difference: it can name its first ten customers this week. Eliminated: YOUR IDEA — a feature looking for a buyer. Ranking: Niche Wedge, Premium, Cheap, Yours.",
-    ),
-    (
-        "You are the Architect. Turn the winning contender",
-        "Slice: one trade, one template, one quote. Files: `app.py`, `templates/roofing.md`, `tests/test_quote.py`. First story: a roofer pastes a job note and gets a quote in 30 seconds. Timebox: two sessions. Defer: accounts, sync, other trades.",
-    ),
-    (
-        "You are the Coroner",
-        "Your idea died of distribution, not quality. The smallest change that would have saved it: pick one trade and one repeated job, and sell the output before building the app. Risk for the winner: the niche is real but small; price the second template before the first invoice.",
-    ),
-    (
-        "You are the Analyst",
-        "The user is not short of tools; they are short of a decision. Evidence: none yet, only the founder's certainty. The assumption that kills this: people record a memo and never open the list.",
-    ),
-    (
-        "You are the PM.",
-        "Product: a memo-to-tasks CLI that prints a checklist in one command. Must-haves: record, transcribe locally, extract three actions. Non-goals: sync, accounts, a mobile app. Metric: one memo into tasks in under a minute. Slice: `memo <file>` prints tasks.",
-    ),
-    (
-        "You are the Architect.",
-        "Slice: `memo <file>` → local transcription → one model call → Markdown list on stdout. Interfaces: `transcribe(path) -> str`, `extract(text) -> list[str]`. Storage: none. Risky dependency: the local model's output discipline. Defer: editing, priorities, integrations.",
-    ),
-    (
-        "You are the Builder.",
-        "Files: `hotseat_core/memo.py`, `tests/test_memo.py`. Interface: `extract_tasks(text: str) -> list[str]`. First test: a three-sentence memo returns two tasks and drops the greeting. Timebox: one session. Done today: the CLI runs on a sample memo.",
-    ),
-    (
-        "You are QA and the closer.",
-        "Acceptance: a sample memo yields 1–5 tasks; no task is a greeting; output is valid Markdown. Kill criteria: transcription needs a cloud key, or tasks are invented. Cut: speaker diarization. GO — the slice is one afternoon and the risk is testable.",
-    ),
+_DEMO_FOOTER = "\n\n_(demo output — no model was called)_"
+
+_SEED_RE = re.compile(r"Seed idea:\s*(.+?)\.\s*Constraints:", re.S)
+_SEED_SHORT_RE = re.compile(r"Seed:\s*(.+?)\.\s", re.S)
+_CONTENDER_RE = re.compile(r"CONTENDER 0 — (.+?)\.\s", re.S)
+_CONSTRAINTS_RE = re.compile(r"Constraints:\s*(.+?)(?:\n|$)", re.S)
+_ANCHOR_RE = re.compile(
+    r"^- ([^|\n]+?) \| ([^|\n]+?) \| ([^|\n]+?) \| (\$[^|\n]+?) \| ([^|\n]+?)(?: \||$)",
+    re.M,
+)
+_SIGNAL_RE = re.compile(
+    r"^- \[([^|\]]+?) \| [^|\n]+? \| weight [\d.]+\] (.+?)(?:\s+—\s+|$)", re.M
+)
+_PRICE_RE = re.compile(
+    r"^- PRICE \[([^|\]]+?) \| [^|\n]+? \| weight [\d.]+\] (.+?): (\$[^\s(]+)", re.M
 )
 
-_DEMO_FOOTER = "\n\n_(demo output — no model was called)_"
+_ROLES = (
+    ("producer", ("You are the Producer",)),
+    ("critic", ("You are the Critic",)),
+    ("foreman", ("You are the Foreman",)),
+    ("architect", ("Turn the winning contender", "Design the vertical slice")),
+    ("coroner", ("You are the Coroner",)),
+    ("analyst", ("You are the Analyst",)),
+    ("pm", ("You are the PM",)),
+    ("builder", ("You are the Builder",)),
+    ("qa", ("You are QA",)),
+    ("adversary", ("You are The Adversary",)),
+    ("reason", ("The Voice of Reason",)),
+    ("whistleblower", ("The Whistleblower",)),
+    ("evangelist", ("The Evangelist",)),
+    ("fixer", ("You are The Fixer",)),
+    ("audrey", ("Dame Audrey",)),
+    ("claib", ("Claiborne",)),
+    ("vertical", ("You are Vertical AI",)),
+    ("marlowe", ("You are Marlowe",)),
+    ("priya", ("You are Priya",)),
+    ("zero", ("You are Zero",)),
+    ("skeptic", ("ruthless skeptics",)),
+    ("volunteer", ("volunteer defending",)),
+)
+
+def _clean_topic(text: str, limit: int = 150) -> str:
+    text = re.sub(r"\s+", " ", text or "").strip().strip("'\"")
+    if len(text) > limit:
+        text = text[: limit - 1].rsplit(" ", 1)[0] + "…"
+    return text or "the idea"
+
+
+_SLUG_STOP = {
+    "a", "an", "the", "my", "our", "your", "this", "that", "for", "to", "of",
+    "into", "and", "or", "with", "from",
+}
+
+
+def _slug(topic: str) -> str:
+    words = [w for w in re.findall(r"[a-z0-9]+", topic.lower()) if w not in _SLUG_STOP]
+    return "-".join(words[:3]) or "slice"
+
+
+def _demo_context(system: str | None, messages: list[Mapping[str, str]]) -> dict[str, Any]:
+    haystack = "\n".join(
+        [system or ""] + [str(message.get("content", "")) for message in messages]
+    )
+    seed = _SEED_RE.search(haystack) or _SEED_SHORT_RE.search(haystack)
+    if seed:
+        topic = _clean_topic(seed.group(1))
+    else:
+        contender = _CONTENDER_RE.search(haystack)
+        first = next(
+            (str(m.get("content", "")) for m in messages if m.get("role") == "user"), ""
+        )
+        raw = contender.group(1) if contender else first.split("\n", 1)[0]
+        topic = _clean_topic(re.sub(r"^(topic|the idea|idea):\s*", "", raw, flags=re.I))
+
+    constraints = _CONSTRAINTS_RE.search(haystack)
+    anchors = [
+        {
+            "competitor": match.group(1).strip(),
+            "price": match.group(4).strip(),
+            "product": match.group(5).strip(),
+        }
+        for match in _ANCHOR_RE.finditer(haystack)
+    ]
+    signals = [
+        {"source": match.group(1).strip(), "title": _clean_topic(match.group(2), 90)}
+        for match in _SIGNAL_RE.finditer(haystack)
+    ]
+    prices = [
+        {"competitor": match.group(1).strip(), "price": match.group(3).strip()}
+        for match in _PRICE_RE.finditer(haystack)
+    ]
+    if not anchors and prices:
+        anchors = [
+            {"competitor": price["competitor"], "price": price["price"], "product": ""}
+            for price in prices
+        ]
+
+    anchor = anchors[0] if anchors else None
+    signal = signals[0] if signals else None
+    if anchor:
+        evidence = f"{anchor['competitor']} already lists {anchor['price']}."
+        price_line = f"{anchor['competitor']} is at {anchor['price']}"
+    elif signal:
+        evidence = f"{signal['source']} is reporting “{signal['title']}”."
+        price_line = "no price anchor on the wire, so test two prices before building"
+    else:
+        evidence = "The wire is quiet for this case, which is itself a finding."
+        price_line = "no price anchor on the wire, so test two prices before building"
+
+    return {
+        "topic": topic,
+        "slug": _slug(topic),
+        "constraints": _clean_topic(constraints.group(1), 120) if constraints else "none given",
+        "anchors": anchors,
+        "signals": signals,
+        "anchor": anchor,
+        "signal": signal,
+        "evidence": evidence,
+        "price_line": price_line,
+        "counts": (
+            f"{len(signals)} signal{'s' if len(signals) != 1 else ''}, "
+            f"{len(anchors)} price point{'s' if len(anchors) != 1 else ''}"
+        ),
+    }
+
+
+def _detect_role(system: str) -> str:
+    for role, needles in _ROLES:
+        if any(needle in system for needle in needles):
+            return role
+    return "panel"
+
+
+def _demo_turn(role: str, system: str, ctx: Mapping[str, Any]) -> str:
+    topic = ctx["topic"]
+    slug = ctx["slug"]
+    evidence = ctx["evidence"]
+    price_line = ctx["price_line"]
+    bmad = "Design the vertical slice" in system
+
+    if role == "producer":
+        under = "the incumbent's price minus a third" if ctx["anchor"] else "$9"
+        premium = "ten times the incumbent" if ctx["anchor"] else "$500/mo"
+        return (
+            f"CONTENDER 0 — {topic}. Customer: whoever is already solving this by hand. "
+            f"Price: {price_line}. First ten: the people who complained about it publicly. "
+            f"Dies on: nobody paying twice.\n"
+            f"CONTENDER 1 — THE CHEAP ONE: one job, one screen, {under}. Wedge: no setup. "
+            f"First ten: one community thread. Dies on: no support loop.\n"
+            f"CONTENDER 2 — THE PREMIUM ONE: done for you at {premium}. Wedge: white glove. "
+            f"First ten: warm intros. Dies on: your calendar.\n"
+            f"CONTENDER 3 — THE NICHE WEDGE: {topic}, only for one trade. Wedge: pre-filled answers. "
+            f"First ten: one trade group. Dies on: a market too small to pay.\n"
+            f"Wire: {evidence}"
+        )
+    if role == "critic":
+        return (
+            f"“{topic}” rests on one unmeasured claim: that the pain is frequent enough to pay for. "
+            f"{evidence} The cheap contender has no support loop, the premium one is your calendar, "
+            f"and the niche wedge needs a group you are not in. None of the four shows a second payment."
+        )
+    if role == "foreman":
+        winner = (
+            f"the niche wedge that undercuts {ctx['anchor']['competitor']}"
+            if ctx["anchor"]
+            else "the cheap one"
+        )
+        return (
+            f"Winner: {winner}. Deciding difference: it can name its first ten buyers this week. "
+            f"Eliminated: the seed — it is a feature looking for a buyer. "
+            f"Ranking: {winner}, premium, cheap, the seed."
+        )
+    if role == "architect":
+        if bmad:
+            return (
+                f"Slice: `{slug}` end to end. Interfaces: `parse(text) -> Case`, "
+                f"`run(case) -> Brief`. Storage: SQLite. Risky dependency: model output discipline. "
+                f"Defer: accounts, sync, scheduling."
+            )
+        return (
+            f"Slice: one path through “{topic}”. Files: `hotseat_core/{slug}.py`, "
+            f"`tests/test_{slug}.py`. First story: a user submits the case and gets a decision "
+            f"plus one next action. Interface: `run(case: str) -> str`. Timebox: one session. "
+            f"Defer: history, accounts, exports."
+        )
+    if role == "coroner":
+        cause = (
+            "distribution, not quality"
+            if not ctx["anchor"]
+            else f"pricing against {ctx['anchor']['competitor']}"
+        )
+        return (
+            f"“{topic}” died of {cause}. {evidence} The smallest change that would have saved it: "
+            f"pick one buyer, one repeated job, and sell the output before the build. "
+            f"The winner's remaining risk: the niche is real but small."
+        )
+    if role == "analyst":
+        return (
+            f"User: someone already doing “{topic}” by hand, badly. Evidence on file: {ctx['counts']}. "
+            f"The assumption that kills it: they will change a habit for a tool. "
+            f"Constraint on record: {ctx['constraints']}."
+        )
+    if role == "pm":
+        return (
+            f"Product: “{topic}”, in one command. Must-haves: capture the case, force one decision, "
+            f"emit one next action. Non-goals: accounts, sync, a mobile app. "
+            f"Metric: case to decision under a minute. Slice: `{slug}` prints the result."
+        )
+    if role == "builder":
+        return (
+            f"Files: `hotseat_core/{slug}.py`, `tests/test_{slug}.py`. "
+            f"Interface: `run(case: str) -> str`. First test: a one-line case returns a non-empty "
+            f"decision. Timebox: one session. Done today: it runs on a sample case."
+        )
+    if role == "qa":
+        return (
+            f"Acceptance: `{slug}` returns one decision and one next action; no invented evidence; "
+            f"output is valid Markdown. Kill criteria: it needs a cloud key, or it fabricates a price. "
+            f"Cut: history. GO — the slice is one session and the risk is testable."
+        )
+    if role == "adversary":
+        return f"“{topic}” fails on ownership. Nobody in the plan owns the boring middle. {evidence}"
+    if role == "reason":
+        return (
+            f"The evidence supports a two-week test of “{topic}”, not a launch. "
+            f"{evidence} Ten real uses will tell you more than another month of planning."
+        )
+    if role == "whistleblower":
+        return (
+            f"The thing nobody is saying about “{topic}”: it is a feature, not a product, and the "
+            f"room already knows it. {evidence} Say it while it is still cheap."
+        )
+    if role == "evangelist":
+        return (
+            f"The case for “{topic}”: it lets one person do work that used to take a team. "
+            f"The blind spot: that person is the buyer, the user, and the support line. {evidence}"
+        )
+    if role == "fixer":
+        return (
+            f"1. Name one owner for “{topic}”. 2. Ship the smallest version this week. "
+            f"3. Log ten uses and review them in fourteen days. Evidence to watch: {evidence}"
+        )
+    if role == "audrey":
+        return (
+            f"“{topic}” assumes the hard part is the build. It is the Tuesday after. {evidence} "
+            f"Decide who owns it then, or stop calling it a product."
+        )
+    if role == "claib":
+        return (
+            f"“{topic}” solves the visible problem. The one underneath is distribution. "
+            f"{evidence} Fix the front door before you add another room."
+        )
+    if role == "vertical":
+        return f"Ship the smallest version of “{topic}” this week. {evidence} Stop planning."
+    if role == "marlowe":
+        return (
+            f"You already know what is wrong with “{topic}”. You are here hoping someone says it "
+            f"is not that bad. {evidence} So — what are we doing about it?"
+        )
+    if role == "priya":
+        return (
+            f"Strip the feeling out of “{topic}”. Which behavior repeats? That loop is the product. "
+            f"Everything downstream is a symptom."
+        )
+    if role == "zero":
+        return (
+            f"“{topic}” is not the real question. What are you avoiding by building it? "
+            f"Answer that before the next session."
+        )
+    if role == "skeptic":
+        return (
+            f"“{topic}” leans on one unmeasured number: that people come back after week two. "
+            f"{evidence} Nothing here tests retention, and the cost model ignores support."
+        )
+    if role == "volunteer":
+        return (
+            f"Fair hit on retention. It is the cheapest thing to fix: run ten sessions of "
+            f"“{topic}” and log who returns. If two do, it survives; if none do, you learned it "
+            f"for a weekend."
+        )
+    return f"“{topic}” needs one owner, one test, and one price. Evidence: {evidence}"
 
 
 def demo_response(system: str | None, messages: list[Mapping[str, str]]) -> str:
-    """Return a deterministic, clearly labeled stand-in reply."""
+    """Return a deterministic, case- and evidence-aware stand-in reply."""
 
-    haystack = " ".join([system or ""] + [str(m.get("content", "")) for m in messages])
-    for name, line in DEMO_LINES:
-        if name in haystack:
-            return line + _DEMO_FOOTER
-    return "This is the demo provider. Set a real provider and key to hear the panel." + _DEMO_FOOTER
+    system_text = system or ""
+    ctx = _demo_context(system, messages)
+    return _demo_turn(_detect_role(system_text), system_text, ctx).strip() + _DEMO_FOOTER
 
 
 def _get_secret(key: str, secret_loader: Callable[[str, str], str] | None = None) -> str:

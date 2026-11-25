@@ -281,7 +281,9 @@ provider failures fall through to the next configured cloud key automatically.
 
 The collected report is attached to the session as `scouts` and also becomes
 `/scouts/latest`. Arena injects the timestamped evidence into the Producer,
-Critic, Foreman, Architect, and Coroner prompts. Response `202`:
+Critic, Foreman, Architect, and Coroner prompts. Every other mode receives the
+same evidence as a system directive, so classic, v2, v3, and bmad are not blind
+to the wire. Response `202`:
 
 ```json
 {

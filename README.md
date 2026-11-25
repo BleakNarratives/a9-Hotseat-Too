@@ -28,29 +28,32 @@ document chain to carry between chats.
 ```bash
 git clone https://github.com/BleakNarratives/a9-Hotseat-Too
 cd a9-Hotseat-Too
-python -m hotseat_core --provider demo "ship the smallest version this week"
+python -m hotseat_core --provider demo "a CLI that turns a voice memo into tasks"
 ```
 
 ```text
 ==============================================================
   THE HOT SEAT — Classic — the idea audit
-  ship the smallest version this week
+  a CLI that turns a voice memo into tasks
 ==============================================================
-I see. You want the version where nobody has to test it. Right then: this plan
-assumes the hard part is the code, when it is the maintenance. Decide who owns
-it on a rainy Tuesday, or stop calling it a product.
+“a CLI that turns a voice memo into tasks” assumes the hard part is the build. It
+is the Tuesday after. The wire is quiet for this case, which is itself a
+finding. Decide who owns it then, or stop calling it a product.
 _(demo output — no model was called)_
 
-Actually, you're solving the visible problem. The thing underneath it is
-distribution — nobody can find the thing you built. Fix the front door before
-you add another room.
+“a CLI that turns a voice memo into tasks” solves the visible problem. The one
+underneath is distribution. The wire is quiet for this case, which is itself a
+finding. Fix the front door before you add another room.
 
-The idea is sound. The timeline is the story you tell yourself to avoid
-starting. Pick the smallest version and ship it this week.
+Ship the smallest version of “a CLI that turns a voice memo into tasks” this
+week. The wire is quiet for this case, which is itself a finding. Stop planning.
 ```
 
-The demo provider is canned and labeled on purpose: build the UI, demo the flow,
-and test the contract before anyone buys a token.
+The demo provider is deterministic and labeled on purpose. It composes every
+turn from your actual pitch and any scout evidence in the prompt — prices,
+competitors, signal headlines — instead of replaying a fixed script, and never
+calls a model. It exists so the UI and the contract can be exercised before
+anyone buys a token.
 
 ## Modes
 
@@ -177,7 +180,7 @@ stored as `"role_models": {"arena": {"producer": "fast-model"}}` under
 | `ollama` | Local, no key; `OLLAMA_BASE_URL` to override |
 | `9router`, `ai_gateway` | Local OpenAI-compatible routers |
 | `openrouter`, `anthropic`, `mistral`, `cerebras`, `groq` | Cloud; env or vault |
-| `demo` | Offline canned replies for frontends, docs, and tests |
+| `demo` | Offline replies composed from the pitch and scout evidence; docs and tests |
 
 ## The live arena console
 
@@ -220,7 +223,9 @@ boardroom table, the idea is a case file you type into, and turns arrive as
 speech bubbles. Click a character to have them hand you their dossier (role,
 model, last turn); the speaking seat lights up and the rest of the room dims.
 The gavel stops a session, the paper strip downloads the transcript, and
-follow-ups appear as a note passed across the table. The paper **program** card
+follow-ups appear as a note passed across the table. The **wire** card shows the
+live scout sweep behind the case — signal count, competitor prices — and opens
+for the headlines. The paper **program** card
 recasts the room for any format — arena, audit, debate, panel, tribunal, brief —
 so nobody needs a terminal flag to pick a show. Exact syntax, provider routing,
 and Scout Wire stay in `/console`; `/table` is an alias for the same room.
@@ -296,7 +301,6 @@ hotseat_core/
   cli.py          python -m hotseat_core
   bridge.py       HTTP/SSE/NDJSON adapter + static console serving
 web/              zero-dependency war room + /m companion shell
-vault_loader.py   compatibility shim for older imports
 tests/            61 tests, stdlib only
 docs/             extracted legacy context, decisions, and the unbuilt show concept
 ```

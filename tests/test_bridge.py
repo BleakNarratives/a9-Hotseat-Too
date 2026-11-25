@@ -80,6 +80,31 @@ class BridgeTests(unittest.TestCase):
         wait_done(job)
         self.assertTrue(any("price it at ten dollars" in prompt for prompt in prompts[1:]))
 
+    def test_scout_evidence_reaches_non_arena_system_prompts(self):
+        systems = []
+
+        class Capture:
+            provider = "capture"
+
+            def complete(self, *, messages, model=None, system=None, sampling=None, on_chunk=None):
+                systems.append(system or "")
+                return "ok"
+
+        runtime = HotseatRuntime(
+            self.config,
+            store=self.store,
+            client_factory=lambda provider, model: Capture(),
+        )
+        bridge = Bridge(self.config, runtime=runtime, store=self.store)
+        job = bridge.start_session(
+            "classic",
+            "a roofing quote tool",
+            scout_context="LIVE SCOUT EVIDENCE\n- [hn | 2026-11-24 | weight 0.90] Roofers lose quotes in text threads",
+        )
+        wait_done(job)
+        self.assertTrue(systems)
+        self.assertIn("Roofers lose quotes", systems[0])
+
     def test_inject_and_stop_reject_unknown_or_finished_sessions(self):
         with self.assertRaises(KeyError):
             self.bridge.inject("nope", "hi")

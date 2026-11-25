@@ -38,6 +38,27 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(types[-1], "session_end")
         self.assertIn("demo output", result.transcript)
 
+    def test_demo_reply_is_built_from_the_case_and_the_wire(self):
+        from hotseat_core.providers import demo_response
+
+        system = "You are the Coroner. Write the autopsy of the seed idea."
+        evidence = (
+            "MARKET ANCHORS (structured pricing):\n"
+            "- acme.test | paid | monthly | $29/mo | Acme Quotes | 2026-11-20"
+        )
+        reply = demo_response(
+            system,
+            [
+                {
+                    "role": "user",
+                    "content": "Seed idea: 'a quote tool for roofers'. Constraints: none.\n\n" + evidence,
+                }
+            ],
+        )
+        self.assertIn("a quote tool for roofers", reply)
+        self.assertIn("$29/mo", reply)
+        self.assertIn("demo output", reply)
+
     def test_v2_and_v3_variants(self):
         runtime = self.runtime()
         debate = runtime.run_session("v2", "an idea", save=False)
