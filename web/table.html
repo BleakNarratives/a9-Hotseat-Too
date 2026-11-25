@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>THE TABLE — The Hot Seat</title>
+  <meta name="description" content="Five characters, one idea, no dashboard. The Hot Seat arena as a room you can talk to.">
+  <link rel="stylesheet" href="/table.css">
+</head>
+<body>
+  <div class="room" id="room" data-phase="lobby">
+    <header class="room-head">
+      <p class="kicker">THE HOT SEAT <span>//</span> THE TABLE</p>
+      <nav class="room-nav" aria-label="Other views">
+        <a href="/console" data-view-link>WAR ROOM</a>
+        <a href="/m" data-view-link>COMPANION</a>
+      </nav>
+      <p class="plaque" id="house-plaque">HOUSE MODEL · …</p>
+    </header>
+
+    <details class="program" id="program">
+      <summary>
+        <span class="program-kicker">TONIGHT’S FORMAT</span>
+        <strong id="program-name">The Arena</strong>
+      </summary>
+      <ul class="program-list" id="program-list"></ul>
+    </details>
+
+    <div class="table-scene" aria-hidden="true">
+      <svg viewBox="0 0 1200 620" preserveAspectRatio="xMidYMid slice">
+        <defs>
+          <radialGradient id="lamp" cx="50%" cy="8%" r="70%">
+            <stop offset="0" stop-color="#ffe4a8" stop-opacity=".42"/>
+            <stop offset="1" stop-color="#ffe4a8" stop-opacity="0"/>
+          </radialGradient>
+          <radialGradient id="felt" cx="46%" cy="32%" r="82%">
+            <stop offset="0" stop-color="#35795a"/>
+            <stop offset=".62" stop-color="#1f5039"/>
+            <stop offset="1" stop-color="#153c2b"/>
+          </radialGradient>
+          <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#8a6a33"/>
+            <stop offset="1" stop-color="#4b3718"/>
+          </linearGradient>
+        </defs>
+        <ellipse cx="600" cy="512" rx="565" ry="112" fill="#08120d" opacity=".85"/>
+        <ellipse cx="600" cy="352" rx="452" ry="206" fill="url(#rim)"/>
+        <ellipse cx="600" cy="342" rx="430" ry="190" fill="url(#felt)"/>
+        <ellipse cx="600" cy="338" rx="392" ry="158" fill="none" stroke="#4f9170" stroke-width="2" opacity=".45"/>
+        <ellipse cx="600" cy="120" rx="560" ry="300" fill="url(#lamp)"/>
+        <text x="600" y="98" text-anchor="middle" fill="#e8c57a" opacity=".11"
+              font-family="Georgia, 'Times New Roman', serif" font-size="50" letter-spacing="16">THE TABLE</text>
+        <g transform="translate(470 300) rotate(-7)" opacity=".9">
+          <rect width="150" height="96" rx="3" fill="#efe3c8" stroke="#c8b894" stroke-width="2"/>
+          <path d="M18 26h92M18 42h66M18 58h78" stroke="#bda98a" stroke-width="4" stroke-linecap="round"/>
+        </g>
+        <g transform="translate(690 290) rotate(6)" opacity=".8">
+          <rect width="126" height="84" rx="3" fill="#e7d9ba" stroke="#c8b894" stroke-width="2"/>
+          <path d="M16 24h82M16 40h54M16 56h70" stroke="#bda98a" stroke-width="4" stroke-linecap="round"/>
+        </g>
+        <g transform="translate(596 268)">
+          <ellipse rx="34" ry="12" fill="#0f2c20"/>
+          <ellipse rx="9" ry="4" fill="#d9a441" opacity=".8"/>
+        </g>
+      </svg>
+    </div>
+
+    <div class="cast" id="cast" aria-label="The boardroom"></div>
+
+    <form class="case-file" id="case-file" autocomplete="off">
+      <label class="case-label" for="case-input">CASE FILE 001 — THE IDEA</label>
+      <input id="case-input" name="topic" type="text" maxlength="400" required
+             placeholder="Pitch the room. Press return." aria-describedby="case-hint">
+      <span class="case-hint" id="case-hint">one idea, five turns, no panel to fill in</span>
+    </form>
+
+    <button class="gavel" id="gavel" type="button" aria-label="Stop the session" title="Stop the session">🔨</button>
+
+    <form class="follow-up" id="follow-up" autocomplete="off" hidden>
+      <label class="case-label" for="follow-input">A HAND GOES UP</label>
+      <input id="follow-input" name="message" type="text" maxlength="400" required
+             placeholder="Ask the room one more thing.">
+    </form>
+
+    <button class="strip" id="strip" type="button" hidden>TEAR OFF THE TRANSCRIPT</button>
+
+    <p class="stamp" id="stamp" hidden aria-live="polite"></p>
+    <p class="live-note" id="live-note" aria-live="polite"></p>
+  </div>
+  <script src="/table.js"></script>
+</body>
+</html>

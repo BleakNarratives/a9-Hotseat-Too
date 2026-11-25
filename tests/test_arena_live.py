@@ -134,7 +134,7 @@ class LiveBridgeTests(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertEqual(refreshed["report"]["counts"]["prices"], 1)
 
-            with urllib.request.urlopen(base + "/", timeout=5) as response:
+            with urllib.request.urlopen(base + "/console", timeout=5) as response:
                 self.assertEqual(response.status, 200)
                 self.assertIn("text/html", response.headers.get("Content-Type", ""))
                 self.assertIn("SCOUT WIRE", response.read().decode("utf-8"))

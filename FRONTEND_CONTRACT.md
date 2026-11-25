@@ -17,17 +17,25 @@ python -m hotseat_core --serve --port 9000
 python -m hotseat_core --serve --provider demo # no keys, no models, demo replies
 ```
 
-`--serve` also hosts the desktop war room at `/`: `web/index.html`,
+`--serve` also hosts the desktop war room at `/console`: `web/index.html`,
 `web/style.css`, and `web/app.js`. It is not a canned page; it reads `/modes`,
 `/providers`, `/scouts/latest`, starts sessions through `POST /sessions`, and
 streams the session through SSE.
 
 Phones and tablets get a dedicated companion at `/m`: `web/mobile.html`,
 `web/mobile.css`, and `web/mobile.js`. It uses the same API and SSE endpoints
-but has a separate setup → live → verdict flow. The desktop page redirects to
-`/m` below 768px unless `?desktop=1` is present. Both shells link to each other.
-Only these six files and the `/m` alias are served — there is no filesystem or
-directory endpoint.
+but has a separate setup → live → verdict flow. The war room redirects to `/m`
+below 768px unless `?desktop=1` is present. Every shell links to the others.
+
+`/` serves the front door — `web/table.html`, `web/table.css`, and `web/table.js`
+— a cartoon boardroom where the cast is the interface. The idea is a case file on
+the table, turns arrive as speech bubbles, clicking a character opens their
+dossier, and the paper program card recasts the room for every mode (arena,
+classic, v2, v3 panel/tribunal, bmad). It uses the same endpoints and SSE events
+as the other shells; `/table` is an alias.
+
+Only these nine files and the `/console`, `/m`, and `/table` aliases are served —
+there is no filesystem or directory endpoint.
 
 The same contract is available as a streaming CLI:
 

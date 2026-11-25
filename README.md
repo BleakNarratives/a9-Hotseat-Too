@@ -181,20 +181,21 @@ stored as `"role_models": {"arena": {"producer": "fast-model"}}` under
 
 ## The live arena console
 
-`--serve` hosts a zero-dependency retro terminal-arena UI at
-**http://127.0.0.1:8765** — no static demo page, no build step:
+`--serve` hosts a zero-dependency web UI at **http://127.0.0.1:8765** — no
+build step, no terminal required after the one command:
 
 ```bash
 python3 -m hotseat_core --serve --provider demo
-# open http://127.0.0.1:8765
+# open http://127.0.0.1:8765          the room
+# open http://127.0.0.1:8765/console  the war room
 ```
 
-The console is wired to the bridge contract: mode and provider selectors, seed
-prompt and constraint tags, push-to-talk dictation (Web Speech API with a text
-fallback), a live four-contender bracket, critic feed, Foreman callout, build
-brief, Coroner autopsy, and threaded follow-ups against the active session. It
-reads the real time/token/persona event stream over SSE and reconnects with an
-event offset instead of replaying duplicates.
+The retro war room at `/console` is wired to the bridge contract: mode and
+provider selectors, seed prompt and constraint tags, push-to-talk dictation (Web
+Speech API with a text fallback), a live four-contender bracket, critic feed,
+Foreman callout, build brief, Coroner autopsy, and threaded follow-ups against
+the active session. It reads the real time/token/persona event stream over SSE
+and reconnects with an event offset instead of replaying duplicates.
 
 **Scout Wire** runs across the top: live ChronoScouts signals, competitor price
 points, and structured market anchors, with a drawer for source health and a
@@ -210,8 +211,19 @@ with a three-state flow: setup, live, and verdict. Setup uses constraint chips a
 a sticky Convene button; live has a speaker spotlight, five-step progress rail,
 swipeable contenders, segmented detail tabs, and a Scout Intel bottom sheet; the
 verdict starts with the winner and offers Share, Copy Markdown, and Download .md.
-The `/` route auto-redirects below 768px unless `?desktop=1` is present, and both
-headers link between War Room and Companion.
+The war room at `/console` auto-redirects below 768px unless `?desktop=1` is
+present, and every shell links back to the room and the companion.
+
+**The Table** at `/` is the front door and the character-first cut of the same
+session: no control panel, no progress rail. Cartoon personas sit around a
+boardroom table, the idea is a case file you type into, and turns arrive as
+speech bubbles. Click a character to have them hand you their dossier (role,
+model, last turn); the speaking seat lights up and the rest of the room dims.
+The gavel stops a session, the paper strip downloads the transcript, and
+follow-ups appear as a note passed across the table. The paper **program** card
+recasts the room for any format — arena, audit, debate, panel, tribunal, brief —
+so nobody needs a terminal flag to pick a show. Exact syntax, provider routing,
+and Scout Wire stay in `/console`; `/table` is an alias for the same room.
 
 ## Live ChronoScouts & market intel
 

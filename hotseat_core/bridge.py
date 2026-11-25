@@ -39,6 +39,9 @@ STATIC_FILES = {
     "mobile.html": "text/html; charset=utf-8",
     "mobile.css": "text/css; charset=utf-8",
     "mobile.js": "text/javascript; charset=utf-8",
+    "table.html": "text/html; charset=utf-8",
+    "table.css": "text/css; charset=utf-8",
+    "table.js": "text/javascript; charset=utf-8",
 }
 
 
@@ -458,9 +461,13 @@ class _Handler(BaseHTTPRequestHandler):
         if root is None or not root.is_dir():
             return False
         if path in ("", "/"):
+            relative = "table.html"
+        elif path.rstrip("/") == "/console":
             relative = "index.html"
         elif path.rstrip("/") == "/m":
             relative = "mobile.html"
+        elif path.rstrip("/") == "/table":
+            relative = "table.html"
         else:
             relative = unquote(path.lstrip("/"))
         if relative not in STATIC_FILES:
