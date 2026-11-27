@@ -18,19 +18,19 @@ class StyleProfile:
 STYLE_PROFILES: dict[str, StyleProfile] = {
     "noslop": StyleProfile(
         "Answer directly. Remove generic praise, filler, repeated conclusions, and canned transitions. Use concrete details.",
-        {"temperature": 0.65, "top_p": 0.9, "frequency_penalty": 0.25, "presence_penalty": 0.0, "max_tokens": 512},
+        {"temperature": 0.65, "top_p": 0.9, "frequency_penalty": 0.25, "presence_penalty": 0.0, "max_tokens": 1400},
     ),
     "nosyco": StyleProfile(
         "Do not open with a greeting, apology, or self-referential disclaimer. Do not claim certainty without support. Be candid and specific.",
-        {"temperature": 0.65, "top_p": 0.9, "frequency_penalty": 0.2, "presence_penalty": 0.0, "max_tokens": 512},
+        {"temperature": 0.65, "top_p": 0.9, "frequency_penalty": 0.2, "presence_penalty": 0.0, "max_tokens": 1400},
     ),
     "terse": StyleProfile(
         "Prefer the shortest complete answer that solves the task. Put the answer first; omit preamble and repetition.",
-        {"temperature": 0.55, "top_p": 0.85, "frequency_penalty": 0.2, "presence_penalty": 0.0, "max_tokens": 256},
+        {"temperature": 0.55, "top_p": 0.85, "frequency_penalty": 0.2, "presence_penalty": 0.0, "max_tokens": 1400},
     ),
     "adversarial_critic": StyleProfile(
         "Stress-test claims and plans. Identify assumptions, failure modes, and evidence gaps; distinguish facts from hypotheses. Critique the work, not the person, and include a viable improvement when possible.",
-        {"temperature": 0.75, "top_p": 0.92, "frequency_penalty": 0.15, "presence_penalty": 0.1, "max_tokens": 640},
+        {"temperature": 0.75, "top_p": 0.92, "frequency_penalty": 0.15, "presence_penalty": 0.1, "max_tokens": 1400},
     ),
 }
 
@@ -39,7 +39,7 @@ _DEFAULT_SAMPLING: dict[str, Any] = {
     "top_p": 0.9,
     "frequency_penalty": 0.0,
     "presence_penalty": 0.0,
-    "max_tokens": 512,
+    "max_tokens": 1400,
 }
 
 
