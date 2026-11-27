@@ -12,6 +12,13 @@ from typing import Any
 from . import __version__
 from .bridge import Bridge, serve
 from .config import HotseatConfig, load_config
+from .cronjob import (
+    DEFAULT_INTERVAL_MINUTES,
+    DEFAULT_TITLE,
+    CronJobError,
+    ensure_keepalive,
+    list_jobs,
+)
 from .personas import MODES, get_persona_set, list_modes
 from .providers import ProviderError, available_providers
 from .runtime import HotseatRuntime
@@ -22,6 +29,7 @@ from .tuning import STYLE_PROFILES
 EXIT_OK = 0
 EXIT_USAGE = 2
 EXIT_PROVIDER = 3
+EXIT_CRON = 4
 EXIT_INTERRUPTED = 130
 
 
@@ -69,6 +77,35 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--allow-origin", action="append", default=[], help="Bridge CORS origin (repeatable).")
     parser.add_argument("--data-dir", default=None, help="Override the data directory.")
     parser.add_argument("--db", default=None, help="Override the SQLite path.")
+    parser.add_argument(
+        "--cron-setup",
+        action="store_true",
+        help="Create or update the cron-job.org keepalive for the public room.",
+    )
+    parser.add_argument(
+        "--cron-list",
+        action="store_true",
+        help="List cron-job.org jobs for the configured account.",
+    )
+    parser.add_argument(
+        "--cron-url",
+        default=None,
+        help="Public base URL (default: HOTSEAT_PUBLIC_URL).",
+    )
+    parser.add_argument(
+        "--cron-title",
+        default=DEFAULT_TITLE,
+        help=f"cron-job.org job title (default: {DEFAULT_TITLE}).",
+    )
+    parser.add_argument(
+        "--cron-every",
+        type=int,
+        default=DEFAULT_INTERVAL_MINUTES,
+        help=(
+            "Minutes between keepalive pings "
+            f"(default: {DEFAULT_INTERVAL_MINUTES})."
+        ),
+    )
     parser.add_argument("--version", action="version", version=f"hotseat {__version__}")
     return parser
 
@@ -87,6 +124,10 @@ def _config_from_args(args: argparse.Namespace) -> HotseatConfig:
         from pathlib import Path
 
         changes["db_path"] = Path(args.db).expanduser()
+    if args.provider:
+        changes["provider"] = args.provider
+    if args.model:
+        changes["model"] = args.model
     return dataclasses.replace(config, **changes) if changes else config
 
 
@@ -124,6 +165,8 @@ def _print_personas(mode_filter: str) -> None:
     for mode in modes:
         if mode not in MODES:
             raise ValueError(f"Unknown mode '{mode}'. Choose: {', '.join(MODES)}.")
+        if mode == "custom":
+            continue
         for variant in MODES[mode]["variants"]:
             persona_set = get_persona_set(mode, variant)
             print(f"\n{mode}:{variant} — {persona_set.label}")
@@ -239,6 +282,46 @@ def _repl(args: argparse.Namespace, config: HotseatConfig) -> int:
             return status
 
 
+def _cron_key() -> str:
+    from .vault_loader import get_secret
+
+    return get_secret("CRONJOB_API_KEY", "")
+
+
+def _cron_list() -> int:
+    key = _cron_key()
+    try:
+        jobs = list_jobs(key)
+    except CronJobError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_CRON
+    print(json.dumps({"jobs": jobs}, indent=2))
+    return EXIT_OK
+
+
+def _cron_setup(args: argparse.Namespace) -> int:
+    base_url = (args.cron_url or os.environ.get("HOTSEAT_PUBLIC_URL") or "").strip()
+    if not base_url:
+        print(
+            "error: pass --cron-url https://<service>.onrender.com or set "
+            "HOTSEAT_PUBLIC_URL.",
+            file=sys.stderr,
+        )
+        return EXIT_USAGE
+    try:
+        result = ensure_keepalive(
+            _cron_key(),
+            base_url,
+            title=args.cron_title,
+            interval_minutes=args.cron_every,
+        )
+    except (CronJobError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_CRON
+    print(json.dumps(result, indent=2))
+    return EXIT_OK
+
+
 def main(argv: list[str] | None = None) -> int:
     try:
         return _main(argv)
@@ -280,6 +363,10 @@ def _main(argv: list[str] | None = None) -> int:
             print(f"error: {exc}", file=sys.stderr)
             return EXIT_USAGE
         return EXIT_OK
+    if args.cron_list:
+        return _cron_list()
+    if args.cron_setup:
+        return _cron_setup(args)
     if args.serve:
         try:
             bridge = Bridge(

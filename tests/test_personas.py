@@ -1,6 +1,6 @@
 import unittest
 
-from hotseat_core.personas import MODES, get_persona_set, list_modes
+from hotseat_core.personas import MODES, cast_roster, get_persona_set, list_modes
 
 
 class PersonaTests(unittest.TestCase):
@@ -62,10 +62,44 @@ class PersonaTests(unittest.TestCase):
 
     def test_modes_are_listed_with_variants(self):
         modes = {entry["mode"]: entry for entry in list_modes()}
-        self.assertEqual(set(modes), set(MODES))
+        self.assertEqual(set(modes), set(MODES) - {"custom"})
         self.assertEqual(modes["v3"]["variants"], ["panel", "tribunal"])
         self.assertEqual(modes["bmad"]["variants"], ["brief"])
         self.assertEqual(modes["arena"]["variants"], ["season"])
+
+    def test_custom_cast_resolves_mode_prefixed_keys(self):
+        roster = cast_roster()
+        self.assertEqual(len(roster), 25)
+        self.assertEqual(len({member["id"] for member in roster}), 25)
+        cast = get_persona_set(
+            "custom",
+            cast=["arena:producer", "bmad:architect", "arena:architect"],
+        )
+        self.assertEqual(
+            [p.key for p in cast.personas],
+            ["arena_producer", "bmad_architect", "arena_architect"],
+        )
+        self.assertEqual(cast.closer, "arena_architect")
+        self.assertEqual(cast.label, "Custom cast — 3 called")
+
+    def test_custom_cast_rejects_empty_unknown_and_overflow(self):
+        with self.assertRaises(ValueError):
+            get_persona_set("custom", cast=[])
+        with self.assertRaises(ValueError):
+            get_persona_set("custom", cast=["nope:nobody"])
+        nine = [
+            "arena:producer",
+            "arena:critic",
+            "arena:foreman",
+            "arena:architect",
+            "arena:coroner",
+            "classic:audrey",
+            "classic:claib",
+            "classic:vertical",
+            "v2:skeptic1",
+        ]
+        with self.assertRaises(ValueError):
+            get_persona_set("custom", cast=nine)
 
     def test_public_payload_hides_system_by_default(self):
         public = get_persona_set("classic").by_key("audrey").public()

@@ -9,7 +9,7 @@ sampling limits. Engines decide what to ask.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 PROJECT_IDENTITY = (
     "You are operating inside The Hot Seat, a local-first idea stress-testing "
@@ -614,7 +614,87 @@ MODES: dict[str, dict[str, Any]] = {
         "variants": {"season": ARENA},
         "default_variant": "season",
     },
+    "custom": {
+        "label": "Custom cast",
+        "description": "Your own call: any persona from the roster, one turn each, in the order you choose.",
+        "variants": {"custom": ()},
+        "default_variant": "custom",
+    },
 }
+
+MAX_CAST = 8
+
+
+def cast_index() -> dict[str, tuple[str, Persona]]:
+    """Every selectable persona by ``mode:key``.
+
+    The same key can exist in two modes (``architect`` is in arena and bmad), so
+    the mode prefix is what makes a cast unambiguous.
+    """
+
+    index: dict[str, tuple[str, Persona]] = {}
+    for mode, meta in MODES.items():
+        if mode == "custom":
+            continue
+        for personas in meta["variants"].values():
+            for persona in personas:
+                index[f"{mode}:{persona.key}"] = (mode, persona)
+    return index
+
+
+def cast_roster() -> list[dict[str, Any]]:
+    """Public roster for a cast picker, grouped by source mode."""
+
+    roster: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for mode, meta in MODES.items():
+        if mode == "custom":
+            continue
+        for variant, personas in meta["variants"].items():
+            for persona in personas:
+                member = f"{mode}:{persona.key}"
+                if member in seen:
+                    continue
+                seen.add(member)
+                roster.append(
+                    {
+                        "id": member,
+                        "mode": mode,
+                        "variant": None if variant == meta["default_variant"] else variant,
+                        "group": meta["label"].split(" — ")[0],
+                        "persona": persona.public(),
+                    }
+                )
+    return roster
+
+
+def resolve_cast(ids: Sequence[str]) -> tuple[Persona, ...]:
+    """Resolve ``mode:key`` ids into unique personas with mode-prefixed keys."""
+
+    index = cast_index()
+    selected: list[Persona] = []
+    seen: set[str] = set()
+    for raw in ids:
+        member = str(raw).strip()
+        if not member:
+            continue
+        entry = index.get(member)
+        if entry is None:
+            entry = next(
+                (value for value in index.values() if value[1].key == member), None
+            )
+        if entry is None:
+            raise ValueError(f"Unknown cast member '{raw}'.")
+        mode, persona = entry
+        if member in seen:
+            continue
+        seen.add(member)
+        selected.append(replace(persona, key=f"{mode}_{persona.key}"))
+    if not selected:
+        raise ValueError("A custom cast needs at least one persona.")
+    if len(selected) > MAX_CAST:
+        raise ValueError(f"A custom cast takes at most {MAX_CAST} personas; got {len(selected)}.")
+    return tuple(selected)
 
 
 def list_modes() -> list[dict[str, Any]]:
@@ -627,6 +707,7 @@ def list_modes() -> list[dict[str, Any]]:
             "default_variant": meta["default_variant"],
         }
         for mode, meta in MODES.items()
+        if mode != "custom"
     ]
 
 
@@ -644,6 +725,7 @@ def get_persona_set(
     mode: str = "classic",
     variant: str | None = None,
     overrides: Mapping[str, Any] | None = None,
+    cast: Sequence[str] | None = None,
 ) -> PersonaSet:
     """Resolve a mode (and variant) into concrete personas.
 
@@ -652,6 +734,16 @@ def get_persona_set(
     """
 
     requested = (mode or "classic").strip().lower()
+    if requested == "custom":
+        personas = resolve_cast(cast or ())
+        return PersonaSet(
+            mode="custom",
+            variant="custom",
+            label=f"Custom cast — {len(personas)} called",
+            description="Your own call, one turn each, in the order you chose.",
+            personas=personas,
+            closer=personas[-1].key,
+        )
     if requested not in MODES:
         raise ValueError(f"Unknown mode '{mode}'. Choose: {', '.join(MODES)}.")
     selected = _variant_key(requested, variant)

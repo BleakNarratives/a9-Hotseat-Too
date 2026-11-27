@@ -27,8 +27,9 @@ class ProviderError(RuntimeError):
     """A concise, user-safe provider selection or request failure.
 
     ``retryable`` marks failures another provider might survive: rate limits,
-    server errors, timeouts, and connection failures. Bad credentials, malformed
-    requests, and invalid responses stay fatal so fallback cannot hide them.
+    billing/quota exhaustion, server errors, timeouts, and connection failures.
+    Bad credentials, malformed requests, and invalid responses stay fatal so
+    fallback cannot hide them.
     """
 
     def __init__(
@@ -41,7 +42,7 @@ class ProviderError(RuntimeError):
         super().__init__(message)
         self.status_code = status_code
         if retryable is None:
-            retryable = status_code == 429 or (
+            retryable = status_code in {402, 429} or (
                 isinstance(status_code, int) and status_code >= 500
             )
         self.retryable = bool(retryable)
@@ -71,6 +72,13 @@ PROVIDERS: dict[str, ProviderSpec] = {
         "openai/gpt-4o-mini",
         needs_key=True,
     ),
+    "gemini": ProviderSpec(
+        "gemini",
+        "https://generativelanguage.googleapis.com/v1beta/openai",
+        ("GEMINI_API_KEY",),
+        "gemini-3.8-flash",
+        needs_key=True,
+    ),
     "anthropic": ProviderSpec(
         "anthropic", "https://api.anthropic.com/v1", ("ANTHROPIC_API_KEY",), "claude-3-5-haiku-latest", "anthropic", True
     ),
@@ -78,10 +86,10 @@ PROVIDERS: dict[str, ProviderSpec] = {
         "mistral", "https://api.mistral.ai/v1", ("MISTRAL_API_KEY",), "mistral-small-latest", needs_key=True
     ),
     "cerebras": ProviderSpec(
-        "cerebras", "https://api.cerebras.ai/v1", ("CEREBRAS_API_KEY",), "llama3.1-8b", needs_key=True
+        "cerebras", "https://api.cerebras.ai/v1", ("CEREBRAS_API_KEY",), "gpt-oss-120b", needs_key=True
     ),
     "groq": ProviderSpec(
-        "groq", "https://api.groq.com/openai/v1", ("GROQ_API_KEY",), "llama-3.1-8b-instant", needs_key=True
+        "groq", "https://api.groq.com/openai/v1", ("GROQ_API_KEY",), "openai/gpt-oss-120b", needs_key=True
     ),
     "ollama": ProviderSpec(
         "ollama", "http://127.0.0.1:11434", (), "llama3.2:1b", "ollama", False
@@ -89,10 +97,27 @@ PROVIDERS: dict[str, ProviderSpec] = {
     "demo": ProviderSpec("demo", "", (), "hotseat-demo", "demo", False),
 }
 
-_CLOUD_ORDER = ("openrouter", "anthropic", "mistral", "cerebras", "groq")
+# Preference order for auto mode and fallback. Gemini is last because an
+# invalid Google key is a fatal 401; putting it earlier would stop the chain
+# before the working free-tier backups. An explicit --provider gemini still
+# selects it directly.
+_CLOUD_ORDER = (
+    "openrouter",
+    "mistral",
+    "cerebras",
+    "groq",
+    "anthropic",
+    "gemini",
+)
+
+PROVIDER_USER_AGENT = (
+    "Hotseat/0.2 (+https://github.com/BleakNarratives/a9-Hotseat-Too)"
+)
+_DEFAULT_MAX_TOKENS = 1024
 
 _DEMO_FOOTER = "\n\n_(demo output — no model was called)_"
 
+_CASE_RE = re.compile(r"The case on the table:\s*(.+?)\n", re.S)
 _SEED_RE = re.compile(r"Seed idea:\s*(.+?)\.\s*Constraints:", re.S)
 _SEED_SHORT_RE = re.compile(r"Seed:\s*(.+?)\.\s", re.S)
 _CONTENDER_RE = re.compile(r"CONTENDER 0 — (.+?)\.\s", re.S)
@@ -155,8 +180,11 @@ def _demo_context(system: str | None, messages: list[Mapping[str, str]]) -> dict
     haystack = "\n".join(
         [system or ""] + [str(message.get("content", "")) for message in messages]
     )
+    case = _CASE_RE.search(haystack)
     seed = _SEED_RE.search(haystack) or _SEED_SHORT_RE.search(haystack)
-    if seed:
+    if case:
+        topic = _clean_topic(case.group(1).rstrip("."))
+    elif seed:
         topic = _clean_topic(seed.group(1))
     else:
         contender = _CONTENDER_RE.search(haystack)
@@ -682,6 +710,10 @@ class ProviderClient:
         body: dict[str, Any] = {"model": model, "messages": normalized}
         allowed = {"temperature", "top_p", "frequency_penalty", "presence_penalty", "max_tokens", "stop"}
         body.update({key: value for key, value in options.items() if key in allowed and value is not None})
+        # OpenRouter reserves credit for the full context window when max_tokens
+        # is omitted, which can reject a valid request as unaffordable. A turn
+        # is a short monologue; 1024 leaves room without the reservation.
+        body.setdefault("max_tokens", _DEFAULT_MAX_TOKENS)
         if stream:
             body["stream"] = True
         return body
@@ -752,7 +784,12 @@ class ProviderClient:
         return Request(
             self.base_url + path,
             data=payload,
-            headers={"Content-Type": "application/json", "Accept": "application/json", **headers},
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": PROVIDER_USER_AGENT,
+                **headers,
+            },
             method="POST",
         )
 
@@ -806,7 +843,7 @@ class ProviderClient:
             raise ProviderError(
                 f"Provider '{self.provider}' returned HTTP {exc.code}{suffix}.",
                 status_code=exc.code,
-                retryable=exc.code == 429 or exc.code >= 500,
+                retryable=exc.code in {402, 429} or exc.code >= 500,
             ) from None
         except (URLError, TimeoutError, socket.timeout, ConnectionError, OSError) as exc:
             reason = getattr(exc, "reason", None) or exc
@@ -872,7 +909,7 @@ class ProviderClient:
                 raise ProviderError(
                     f"Provider '{self.provider}' returned HTTP {exc.code}{suffix}.",
                     status_code=exc.code,
-                    retryable=exc.code == 429 or exc.code >= 500,
+                    retryable=exc.code in {402, 429} or exc.code >= 500,
                 ) from None
             except (URLError, TimeoutError, socket.timeout, ConnectionError, OSError) as exc:
                 if attempt + 1 < attempts:

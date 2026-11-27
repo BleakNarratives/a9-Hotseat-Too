@@ -50,6 +50,11 @@ class BridgeTests(unittest.TestCase):
         self.assertIn("memory_saved", types)
         self.assertEqual(types[-1], "session_end")
 
+    def test_provider_status_reports_the_active_house_provider(self):
+        status = self.bridge.provider_status()
+        self.assertEqual(status["active"], "demo")
+        self.assertIn("providers", status)
+
     def test_injection_is_applied_to_a_later_turn(self):
         prompts = []
         first_started = threading.Event()
@@ -104,6 +109,21 @@ class BridgeTests(unittest.TestCase):
         wait_done(job)
         self.assertTrue(systems)
         self.assertIn("Roofers lose quotes", systems[0])
+
+    def test_custom_cast_session_via_bridge(self):
+        job = self.bridge.start_session(
+            "custom",
+            "a voice memo to tasks CLI",
+            cast=["arena:producer", "classic:audrey"],
+            sampling={"sampling_overrides": {"temperature": 1.1}},
+        )
+        wait_done(job)
+        self.assertIsNone(job.error)
+        self.assertEqual(job.result["mode"], "custom")
+        self.assertEqual(
+            [turn["persona"] for turn in job.result["turns"]],
+            ["arena_producer", "classic_audrey"],
+        )
 
     def test_inject_and_stop_reject_unknown_or_finished_sessions(self):
         with self.assertRaises(KeyError):

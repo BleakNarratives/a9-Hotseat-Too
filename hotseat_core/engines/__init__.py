@@ -1,4 +1,4 @@
-"""Engine registry for the three conversation flavors."""
+"""Engine registry for the available conversation flavors."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from .arena import ArenaEngine
 from .base import Engine, Turn, TurnRequest, render_transcript
 from .bmad import BriefEngine
 from .classic import ClassicEngine
+from .custom import CustomCastEngine
 from .followup import FollowUpEngine
 from .v2_web import DebateEngine
 from .v3_agent import PanelEngine, TribunalEngine
@@ -20,6 +21,7 @@ ENGINES = {
     "v3.tribunal": TribunalEngine,
     "bmad": BriefEngine,
     "arena": ArenaEngine,
+    "custom": CustomCastEngine,
 }
 
 
@@ -53,6 +55,7 @@ __all__ = [
     "ArenaEngine",
     "BriefEngine",
     "ClassicEngine",
+    "CustomCastEngine",
     "FollowUpEngine",
     "DebateEngine",
     "Engine",

@@ -169,6 +169,9 @@ python3 -m hotseat_core --mode arena \
   "my idea"
 ```
 
+Custom casts send `"mode": "custom"` plus `"cast": ["arena:producer", ...]`
+(1–8 ids, resolved from `GET /personas`). One turn per persona, in order.
+
 The same map is accepted as `role_models` on `POST /sessions`; `manifest.json`
 persona overrides continue to work for durable defaults, and role defaults can be
 stored as `"role_models": {"arena": {"producer": "fast-model"}}` under
@@ -176,11 +179,28 @@ stored as `"role_models": {"arena": {"producer": "fast-model"}}` under
 
 | Provider | Notes |
 | :--- | :--- |
-| `auto` | Probe local 9router → first configured cloud key → OpenRouter default |
+| `auto` | Probe local 9router → first configured cloud key → OpenRouter default; billing/rate-limit/server failures fall through to the next configured key |
 | `ollama` | Local, no key; `OLLAMA_BASE_URL` to override |
 | `9router`, `ai_gateway` | Local OpenAI-compatible routers |
-| `openrouter`, `anthropic`, `mistral`, `cerebras`, `groq` | Cloud; env or vault |
+| `openrouter`, `gemini`, `mistral`, `cerebras`, `groq`, `anthropic` | Cloud; env or vault |
 | `demo` | Offline replies composed from the pitch and scout evidence; docs and tests |
+
+Current cloud defaults: OpenRouter `openai/gpt-4o-mini`, Gemini
+`gemini-3.8-flash`, Mistral `mistral-small-latest`, Cerebras `gpt-oss-120b`,
+and Groq `openai/gpt-oss-120b`. Override any of them with
+`OPENROUTER_MODEL`, `GEMINI_MODEL`, `MISTRAL_MODEL`, `CEREBRAS_MODEL`, or
+`GROQ_MODEL`.
+
+### What the voice costs
+
+Nothing, as shipped. Dictation uses the browser's speech recognizer and
+read-aloud uses its installed voices; there is no audio API, no key, and no
+per-minute bill. The trade is quality: browser voices are serviceable, not
+studio character acting. If you later want real character voices, Piper or
+Kokoro can run self-hosted for free (CPU, extra memory) and ElevenLabs is the
+paid ceiling. For the panel itself, a free Gemini, Groq, Cerebras, or
+OpenRouter key is enough to leave demo mode; Mistral needs an activated API
+budget on your account. Ollama is the fully local option.
 
 ## The live arena console
 
@@ -227,7 +247,17 @@ follow-ups appear as a note passed across the table. The **wire** card shows the
 live scout sweep behind the case — signal count, competitor prices — and opens
 for the headlines. The paper **program** card
 recasts the room for any format — arena, audit, debate, panel, tribunal, brief —
-so nobody needs a terminal flag to pick a show. Exact syntax, provider routing,
+so nobody needs a terminal flag to pick a show.
+
+The **call sheet** goes further: check any one to five of the 25 personas from
+every format, including both Architects, and the room runs them in the order you
+picked. The **dial** sets how loose the room gets — clinical at 0, measured in
+the middle, unhinged at 11 — and **ROLL** drops it somewhere random. The mic on
+the case file dictates the pitch through the browser's speech recognizer;
+**VOICE** reads finished turns aloud, with a different installed voice plus
+pitch and rate mapped to each character. Dictation needs Chrome, Edge, or Safari
+over HTTPS. Read-aloud uses whatever voices the machine already has, so the
+quality is the browser's, not a studio's. Exact syntax, provider routing,
 and Scout Wire stay in `/console`; `/table` is an alias for the same room.
 
 ## Live ChronoScouts & market intel
@@ -368,28 +398,64 @@ instance, a public `onrender.com` URL with TLS, custom domains included.
 
 1. Push this repo to GitHub.
 2. Render → **New → Blueprint** → select the repo. `render.yaml` creates the
-   service and sets `HOTSEAT_PROVIDER=demo`; it prompts once for
-   `HOTSEAT_TOKEN`. Use a long letters-and-digits passphrase — the token travels
-   in a query string, where `+`, `&`, `#` and `?` change its meaning.
+   service, sets `HOTSEAT_PROVIDER=auto`, and prompts for `HOTSEAT_TOKEN` plus
+   the five provider keys. Fill at least one provider key; leave the others
+   blank. For a zero-key public demo, set `HOTSEAT_PROVIDER=demo` instead. Use a
+   long letters-and-digits token — it travels in a query string, where `+`,
+   `&`, `#` and `?` change its meaning.
 3. Share `https://<service>.onrender.com/?token=<passphrase>`. The console
    forwards the token to its fetches and the EventSource; the static shell loads
    without it, every API route needs it. Without `render.yaml`, create a Docker
-   web service and set the same two env vars by hand.
+   web service and set `HOTSEAT_PROVIDER=auto`, `HOTSEAT_TOKEN`, and at least
+   one provider key by hand.
 
 `--provider demo` is canned output: safe to expose, costs nothing, and tests the
-flow rather than the model. For real answers, point the service at your own key
-(`HOTSEAT_PROVIDER=openrouter` plus `OPENROUTER_API_KEY`) and keep the token: it
-is a shared secret, and every session spends your budget. Cap the key at the
-provider, not in the app. Leave the UI provider selector on **AUTO**, which uses
-the server configuration.
+flow rather than the model. The Blueprint defaults to real providers via
+`HOTSEAT_PROVIDER=auto`; add at least one of `OPENROUTER_API_KEY`,
+`GEMINI_API_KEY`, `MISTRAL_API_KEY`, `CEREBRAS_API_KEY`, or `GROQ_API_KEY`.
+Auto mode starts with the first configured key and falls back on billing,
+rate-limit, and server failures; backups use their own default model, so a
+per-role model name from one provider will not be sent to another. Keep the
+token: it is a shared secret, and every session spends your budget. Cap each
+key at the provider, not in the app. Leave the UI provider selector on
+**AUTO**, which uses the server configuration.
 
 Known free-tier edges, all by design on Render: the service spins down after 15
 idle minutes and takes about a minute to wake, so a session left open can lose
 its in-memory job (the SQLite history survives); the filesystem is ephemeral, so
 `~/hotseat` resets on every deploy, restart, or spin-down; bandwidth is 5 GB a
 month. Upgrade the service to the $7/month plan for always-on without changing
-anything else. For a named always-on host with a credit card, Fly.io or a small
-VPS runs the same `Dockerfile` unchanged.
+anything else. For a true always-on free VM, Oracle Cloud Always Free offers a
+small Arm instance (a card is required for identity verification, and capacity
+varies by region); run the same `Dockerfile` there. Fly.io now requires a card
+for its free allowance.
+
+### Keep the free room warm with cron-job.org
+
+cron-job.org can GET the public `/` shell every ten minutes; that is ordinary
+traffic, so Render does not spin the service down. Only the cron-job.org key is
+needed — the Hot Seat bearer token never leaves the app.
+
+1. cron-job.org Console → **Settings** → **API key** → create one.
+2. Add `CRONJOB_API_KEY` in the Freebuff Keys tab (or export it).
+3. Once the Render URL exists, create or update the job:
+
+```bash
+HOTSEAT_PUBLIC_URL=https://<service>.onrender.com \
+  python3 -m hotseat_core --cron-setup
+```
+
+It creates a job titled **Hot Seat keepalive** that pings `/` every 10 minutes.
+`--cron-every 15` changes the interval, and `--cron-list` shows the account's
+jobs. The job is a plain GET against the public HTML shell, so it never needs
+`HOTSEAT_TOKEN`.
+
+The trade-off: keeping the free instance awake 24/7 uses nearly all of Render's
+750 free instance hours for the month. If you would rather let it sleep between
+visits, skip this job. The cron-job.org API allows 100 requests a day by
+default, so setup and updates are not high-frequency operations. Netlify and
+Vercel cannot replace Render here: this app needs one long-lived process for
+SSE, in-memory sessions, and SQLite, not short-lived serverless functions.
 
 ## Roadmap
 

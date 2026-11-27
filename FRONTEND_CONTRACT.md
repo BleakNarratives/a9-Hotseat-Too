@@ -113,11 +113,15 @@ Errors always have the shape:
 Credential readiness for every provider. Values are never included; keyed
 providers are `configured` only when a credential resolves from the environment,
 repo `.env`, or the Concierge vault. Local/demo providers need no key and are
-marked configured; reachability is not probed here.
+marked configured; reachability is not probed here. `active` is the provider the
+server will actually use for a session that does not override it (`auto` means
+the server picks), and `model` is its configured model override, if any.
 
 ```json
 {
-  "configured": ["openrouter", "demo", "ollama"],
+  "active": "demo",
+  "model": null,
+  "configured": ["openrouter", "gemini", "demo", "ollama"],
   "missing_credentials": ["anthropic", "mistral", "cerebras", "groq"],
   "providers": [
     {
@@ -257,7 +261,8 @@ Starts a session in a background thread. Returns immediately.
   "model": "llama3.2:1b",
   "styles": ["nosyco", "terse"],
   "system_directive": "This is a family business; the answer must include a Tuesday.",
-  "sampling": { "temperature": 0.7, "max_tokens": 300 },
+  "sampling": { "sampling_overrides": { "temperature": 0.7, "max_tokens": 300 } },
+  "cast": ["arena:producer", "classic:audrey"],
   "options": {
     "statement": "v2 only: the volunteer's opening statement",
     "constraints": "arena only: budget $0, one weekend"
@@ -268,10 +273,23 @@ Starts a session in a background thread. Returns immediately.
 }
 ```
 
-Only `mode` and `topic` are required. `mode` is `classic`, `v2`, `v3`, `bmad`, or
-`arena`. `role_models` maps persona keys to models for this session and overrides
-manifest persona models; unknown keys are rejected by the runtime. Retryable
-provider failures fall through to the next configured cloud key automatically.
+Only `mode` and `topic` are required. `mode` is `classic`, `v2`, `v3`, `bmad`,
+`arena`, or `custom`. `role_models` maps persona keys to models for this session
+and overrides manifest persona models; unknown keys are rejected by the runtime.
+Retryable provider failures fall through to the next configured cloud key
+automatically.
+
+`cast` is required for `custom` and ignored otherwise: one to eight `mode:key`
+ids drawn from the existing persona endpoints (`arena:producer`,
+`bmad:architect`, `v3:fixer`, ...). The duplicate `architect` is why the mode
+prefix exists. The engine gives each selected persona one turn, in the order
+sent; the last persona answers follow-ups. Keys in events come back with the
+mode prefix (`arena_producer`).
+
+`sampling` is merged under each persona's own temperature and token cap, so a
+plain `temperature` there does **not** win. Put per-session overrides in
+`sampling.sampling_overrides`; those apply last. An empty `styles` list clears
+configured styles for that session.
 
 `scout_context` is optional:
 

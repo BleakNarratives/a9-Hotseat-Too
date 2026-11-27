@@ -6,7 +6,7 @@ import threading
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Sequence
 
 from .config import HotseatConfig
 from .engines import Engine, FollowUpEngine, Turn, build_engine, render_transcript
@@ -89,6 +89,7 @@ class HotseatRuntime:
         options: Mapping[str, Any] | None = None,
         persona_overrides: Mapping[str, Any] | None = None,
         role_models: Mapping[str, str] | None = None,
+        cast: Sequence[str] | None = None,
     ) -> Engine:
         selected_provider = (provider or self.config.provider or "auto").strip().lower()
         selected_model = model or self.config.model
@@ -106,7 +107,7 @@ class HotseatRuntime:
                 role_overrides[str(key)] = {"model": str(model_name).strip()}
         if role_overrides:
             overrides = merge_overrides(overrides, role_overrides)
-        persona_set = get_persona_set(mode, variant, overrides=overrides)
+        persona_set = get_persona_set(mode, variant, overrides=overrides, cast=cast)
         if role_overrides:
             known = {persona.key for persona in persona_set.personas}
             unknown = sorted(set(role_overrides) - known)
@@ -154,6 +155,7 @@ class HotseatRuntime:
         injection: Callable[[], str | None] | None = None,
         save: bool = True,
         session_id: str | None = None,
+        cast: Sequence[str] | None = None,
     ) -> SessionResult:
         emitter = emit or (lambda event: None)
         topic = (topic or "").strip()
@@ -172,6 +174,7 @@ class HotseatRuntime:
             options=options,
             persona_overrides=persona_overrides,
             role_models=role_models,
+            cast=cast,
         )
         provider_name = getattr(engine.client, "provider", provider or self.config.provider)
         started = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")

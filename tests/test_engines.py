@@ -94,6 +94,52 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(result.variant, "season")
         self.assertIn("arena:season", result.transcript)
 
+    def test_custom_cast_runs_one_turn_each_in_order(self):
+        runtime = self.runtime()
+        result = runtime.run_session(
+            "custom",
+            "a voice memo to tasks CLI",
+            cast=["classic:audrey", "arena:coroner", "bmad:qa"],
+            save=False,
+        )
+        self.assertEqual(
+            [t.persona for t in result.turns],
+            ["classic_audrey", "arena_coroner", "bmad_qa"],
+        )
+        self.assertEqual(result.variant, "custom")
+        self.assertIn("custom:custom", result.transcript)
+        self.assertIn("a voice memo to tasks CLI", result.transcript)
+        for turn in result.turns:
+            self.assertNotIn("The case on the table", turn.content)
+
+    def test_custom_cast_sampling_overrides_reach_the_client(self):
+        seen = []
+
+        class Recorder:
+            provider = "recorder"
+
+            def complete(self, *, messages, model=None, system=None, sampling=None, on_chunk=None):
+                seen.append(dict(sampling or {}))
+                if on_chunk:
+                    on_chunk("ok")
+                return "ok"
+
+        config = load_config(root=self.root, env={"HOTSEAT_DATA_DIR": str(self.root)})
+        runtime = HotseatRuntime(
+            config,
+            store=SessionStore(config.db_path, config.session_log),
+            client_factory=lambda provider, model: Recorder(),
+        )
+        runtime.run_session(
+            "custom",
+            "seed",
+            cast=["classic:audrey"],
+            sampling={"sampling_overrides": {"temperature": 1.15, "max_tokens": 620}},
+            save=False,
+        )
+        self.assertEqual(seen[0]["temperature"], 1.15)
+        self.assertEqual(seen[0]["max_tokens"], 620)
+
     def test_arena_constraints_reach_the_producer(self):
         seen = []
 

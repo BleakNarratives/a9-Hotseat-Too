@@ -7,8 +7,22 @@ services:
     region: oregon
     autoDeployTrigger: commit
     envVars:
+      # Auto starts with the first configured key and falls back on billing,
+      # rate-limit, and server failures. At least one provider key must be set.
       - key: HOTSEAT_PROVIDER
-        value: demo
+        value: auto
+      # Prompted once at Blueprint creation. Leave a provider blank to skip it;
+      # the provider layer ignores empty keys and falls through to the rest.
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: MISTRAL_API_KEY
+        sync: false
+      - key: CEREBRAS_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
       # Prompted once at Blueprint creation. Use letters and digits only: the
       # token travels in a query string, where +, &, # and ? change its meaning.
       - key: HOTSEAT_TOKEN

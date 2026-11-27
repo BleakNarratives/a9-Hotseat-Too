@@ -18,13 +18,36 @@
       <p class="plaque" id="house-plaque">HOUSE MODEL · …</p>
     </header>
 
+    <div class="console">
     <details class="program" id="program">
       <summary>
         <span class="program-kicker">TONIGHT’S FORMAT</span>
         <strong id="program-name">The Arena</strong>
       </summary>
       <ul class="program-list" id="program-list"></ul>
+      <div class="call-sheet" id="call-sheet">
+        <div class="call-head">
+          <span class="program-kicker">CALL SHEET</span>
+          <strong id="call-count">5 called</strong>
+        </div>
+        <div class="call-list" id="call-list"></div>
+      </div>
     </details>
+
+    <div class="dial-card" id="dial-card">
+      <div class="dial-head">
+        <span class="program-kicker">DIAL</span>
+        <output id="dial-value" for="dial">7</output>
+      </div>
+      <input id="dial" type="range" min="0" max="11" step="1" value="7"
+             aria-label="Panel intensity, zero to eleven">
+      <div class="dial-foot">
+        <span id="dial-label">loose</span>
+        <button id="dial-roll" type="button" title="Roll a random setting">ROLL</button>
+      </div>
+      <button class="voice" id="voice" type="button" aria-pressed="false">🔇 VOICE OFF</button>
+    </div>
+    </div>
 
     <button class="wire" id="wire" type="button" aria-expanded="false" hidden>
       <span class="wire-kicker">THE WIRE</span>
@@ -65,9 +88,19 @@
           <rect width="126" height="84" rx="3" fill="#e7d9ba" stroke="#c8b894" stroke-width="2"/>
           <path d="M16 24h82M16 40h54M16 56h70" stroke="#bda98a" stroke-width="4" stroke-linecap="round"/>
         </g>
-        <g transform="translate(596 268)">
-          <ellipse rx="34" ry="12" fill="#0f2c20"/>
-          <ellipse rx="9" ry="4" fill="#d9a441" opacity=".8"/>
+        <g transform="translate(600 276)">
+          <ellipse cx="0" cy="18" rx="48" ry="13" fill="#0f2c20"/>
+          <rect x="-30" y="-2" width="60" height="14" rx="7" fill="#1b1710" stroke="#d9a441" stroke-width="2"/>
+          <rect x="-17" y="-32" width="34" height="28" rx="14" fill="#2a2418" stroke="#d9a441" stroke-width="2"/>
+          <line x1="0" y1="-32" x2="0" y2="-46" stroke="#d9a441" stroke-width="2"/>
+          <circle cx="0" cy="-50" r="3" fill="#d9a441"/>
+          <circle class="on-air" cx="0" cy="5" r="3" fill="#4a1b16"/>
+        </g>
+        <g transform="translate(806 334)" opacity=".82">
+          <ellipse cx="0" cy="10" rx="26" ry="7" fill="#0f2c20"/>
+          <path d="M-14 -4h28l-4 16h-20z" fill="#efe3c8" stroke="#c8b894" stroke-width="2"/>
+          <path d="M18 -2h6v10h-6z" fill="none" stroke="#c8b894" stroke-width="2"/>
+          <path d="M-6 -10c-3-8 5-8 2-16M6 -10c-3-8 5-8 2-16" fill="none" stroke="#e8ddc0" stroke-width="2" stroke-linecap="round" opacity=".35"/>
         </g>
       </svg>
     </div>
@@ -76,8 +109,12 @@
 
     <form class="case-file" id="case-file" autocomplete="off">
       <label class="case-label" for="case-input">CASE FILE 001 — THE IDEA</label>
-      <input id="case-input" name="topic" type="text" maxlength="400" required
-             placeholder="Pitch the room. Press return." aria-describedby="case-hint">
+      <div class="case-row">
+        <input id="case-input" name="topic" type="text" maxlength="400" required
+               placeholder="Pitch the room. Press return." aria-describedby="case-hint">
+        <button class="mic" id="case-mic" type="button" aria-pressed="false"
+                aria-label="Dictate the case" title="Dictate the case">🎙</button>
+      </div>
       <span class="case-hint" id="case-hint">one idea, five turns, no panel to fill in</span>
     </form>
 

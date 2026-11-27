@@ -66,6 +66,14 @@ class ProviderFallbackTests(unittest.TestCase):
         client = FallbackClient([primary, backup])
         self.assertEqual(client.complete(messages=[]), "backup answer")
 
+    def test_billing_failure_falls_back(self):
+        primary = FailingClient(status=402)
+        backup = WorkingClient()
+        client = FallbackClient([primary, backup])
+        self.assertEqual(client.complete(messages=[]), "backup answer")
+        self.assertTrue(client.fallback_used)
+        self.assertTrue(ProviderError("billing", status_code=402).retryable)
+
     def test_non_retryable_failure_does_not_fall_back(self):
         primary = FailingClient(status=401, retryable=False)
         backup = WorkingClient()
@@ -90,6 +98,20 @@ class ProviderFallbackTests(unittest.TestCase):
         names = [item.provider for item in client.clients]
         self.assertEqual(names[0], "openrouter")
         self.assertIn("mistral", names)
+        self.assertIn("gemini", names)
+
+    def test_openai_requests_cap_tokens_and_identify_the_app(self):
+        client = ProviderClient("openrouter", api_key="test-key")
+        request = client._build_request(
+            [{"role": "user", "content": "hello"}],
+            "openai/gpt-4o-mini",
+            None,
+            {},
+            stream=False,
+        )
+        body = json.loads(request.data.decode("utf-8"))
+        self.assertEqual(body["max_tokens"], 1024)
+        self.assertIn("Hotseat", request.get_header("User-agent", ""))
 
     def test_status_never_exposes_secret_values(self):
         secrets = {

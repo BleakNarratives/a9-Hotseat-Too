@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Sequence
 from urllib.parse import parse_qs, unquote, urlparse
 
 from . import __version__
@@ -172,11 +172,14 @@ class Bridge:
         persona_overrides: Mapping[str, Any] | None = None,
         scout_context: Any = None,
         role_models: Mapping[str, str] | None = None,
+        cast: Sequence[str] | None = None,
     ) -> SessionJob:
         topic = (topic or "").strip()
         if not topic:
             raise ValueError("A session topic is required.")
-        persona_set = self.persona_set(mode, variant, extra_overrides=persona_overrides)
+        persona_set = self.persona_set(
+            mode, variant, extra_overrides=persona_overrides, cast=cast
+        )
         if role_models:
             known = {persona.key for persona in persona_set.personas}
             unknown = sorted(set(role_models) - known)
@@ -264,6 +267,7 @@ class Bridge:
                     stop_event=job.stop_event,
                     injection=injection,
                     session_id=job.id,
+                    cast=cast,
                 )
                 job.result = result.public()
             except Exception as exc:  # reported to the client, never raised in a thread
@@ -370,15 +374,16 @@ class Bridge:
         variant: str | None = None,
         *,
         extra_overrides: Mapping[str, Any] | None = None,
+        cast: Sequence[str] | None = None,
     ) -> Any:
-        probe = get_persona_set(mode, variant)
+        probe = get_persona_set(mode, variant, cast=cast)
         overrides = merge_overrides(
             self.config.persona_overrides(mode, probe.variant),
             self.persona_overrides.get((probe.mode, probe.variant or ""), {}),
         )
         if extra_overrides:
             overrides = merge_overrides(overrides, extra_overrides)
-        return get_persona_set(mode, probe.variant, overrides=overrides)
+        return get_persona_set(mode, probe.variant, overrides=overrides, cast=cast)
 
     def update_persona(
         self,
@@ -428,6 +433,8 @@ class Bridge:
         rows = configured_providers(self.secret_loader)
         return {
             "providers": rows,
+            "active": self.config.provider,
+            "model": self.config.model,
             "configured": [row["name"] for row in rows if row["configured"]],
             "missing_credentials": [
                 row["name"]
@@ -658,6 +665,7 @@ class _Handler(BaseHTTPRequestHandler):
                     persona_overrides=body.get("personas") if isinstance(body.get("personas"), Mapping) else None,
                     scout_context=body.get("scout_context"),
                     role_models=body.get("role_models") if isinstance(body.get("role_models"), Mapping) else None,
+                    cast=body.get("cast") if isinstance(body.get("cast"), list) else None,
                 )
                 self._send_json(
                     HTTPStatus.ACCEPTED,

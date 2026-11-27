@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from hotseat_core.providers import ProviderClient
 from hotseat_core.vault_loader import get_secret
@@ -92,16 +93,17 @@ class VaultTests(unittest.TestCase):
 
     def test_provider_client_resolves_vault_without_exports(self):
         self.write_vault({"mistral": {"api_key": "mistral-secret"}})
-        client = ProviderClient(
-            "mistral",
-            secret_loader=lambda key, default: get_secret(
-                key,
-                default,
-                environ={},
-                env_file=self.root / "missing.env",
-                vault_path=self.vault,
-            ),
-        )
+        with mock.patch.dict("os.environ", {}, clear=True):
+            client = ProviderClient(
+                "mistral",
+                secret_loader=lambda key, default: get_secret(
+                    key,
+                    default,
+                    environ={},
+                    env_file=self.root / "missing.env",
+                    vault_path=self.vault,
+                ),
+            )
         self.assertEqual(client.api_key, "mistral-secret")
 
 
