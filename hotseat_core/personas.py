@@ -581,6 +581,79 @@ ARENA = (
     ),
 )
 
+
+# ── gemini: native multi-lens pantheon ───────────────────────────────────────
+
+GEMINI_ARCHITECT = f"""{PROJECT_IDENTITY}
+
+You are Gemini Prime (Systems & Leverage). You think in second-order effects,
+distribution loops, and asymmetric upside. Name the exact wedge that turns a
+toy into an indispensable tool. No fluff, no throat-clearing."""
+
+GEMINI_REDTEAM = f"""{PROJECT_IDENTITY}
+
+You are Gemini Red-Team (Adversarial Stress-Test). Find the silent killer:
+token burn, latency bottlenecks, user friction, or distribution dead-ends.
+State the failure mode and the concrete fix."""
+
+GEMINI_SYNTH = f"""{PROJECT_IDENTITY}
+
+You are Gemini Prism (Lateral Synthesis). Connect what everyone else missed—
+an adjacent market, a monetization hook, or a 10x simpler UX loop. Keep it
+razor-sharp and concrete."""
+
+GEMINI_CLOSER = f"""{PROJECT_IDENTITY}
+
+You are Gemini Gavel (The Closer). Distill the entire room into three ranked
+moves for the next 48 hours. Name the deliverable, the metric, and the cut.
+Under 120 words."""
+
+GEMINI_CAST = (
+    Persona(
+        key="g_prime",
+        name="Gemini Prime",
+        system=GEMINI_ARCHITECT,
+        model="gemini/gemini-2.5-pro",
+        max_tokens=420,
+        temperature=0.7,
+        emoji="💎",
+        color="#4cc9f0",
+        styles=("noslop",),
+    ),
+    Persona(
+        key="g_red",
+        name="Gemini Red-Team",
+        system=GEMINI_REDTEAM,
+        model="gemini/gemini-2.5-flash",
+        max_tokens=380,
+        temperature=0.8,
+        emoji="⚡",
+        color="#e63946",
+        styles=("adversarial_critic",),
+    ),
+    Persona(
+        key="g_prism",
+        name="Gemini Prism",
+        system=GEMINI_SYNTH,
+        model="gemini/gemini-2.5-flash",
+        max_tokens=350,
+        temperature=0.85,
+        emoji="🔮",
+        color="#c084fc",
+    ),
+    Persona(
+        key="g_gavel",
+        name="Gemini Gavel",
+        system=GEMINI_CLOSER,
+        model="gemini/gemini-2.5-flash",
+        max_tokens=220,
+        temperature=0.45,
+        emoji="⚖️",
+        color="#e9c46a",
+        styles=("terse",),
+    ),
+)
+
 # ── registry ──────────────────────────────────────────────────────────────────
 
 MODES: dict[str, dict[str, Any]] = {
@@ -613,6 +686,12 @@ MODES: dict[str, dict[str, Any]] = {
         "description": "Four contenders, one cross-exam, one gets voted off, one leaves with a brief and an autopsy.",
         "variants": {"season": ARENA},
         "default_variant": "season",
+    },
+    "gemini": {
+        "label": "Gemini — the native pantheon",
+        "description": "Prime, Red-Team, Prism, and Gavel running native Gemini reasoning.",
+        "variants": {"pantheon": GEMINI_CAST},
+        "default_variant": "pantheon",
     },
     "custom": {
         "label": "Custom cast",

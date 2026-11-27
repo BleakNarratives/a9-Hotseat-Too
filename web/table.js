@@ -76,6 +76,7 @@
     { key: "v3:panel", mode: "v3", variant: "panel", name: "The Panel", blurb: "witness, systems, closer" },
     { key: "v3:tribunal", mode: "v3", variant: "tribunal", name: "The Tribunal", blurb: "four roles, three ranked actions" },
     { key: "bmad", mode: "bmad", variant: null, name: "The Brief", blurb: "one pass, a build you can start" },
+    { key: "gemini", mode: "gemini", variant: null, name: "Gemini Pantheon", blurb: "Prime, Red-Team, Prism, Gavel" },
     { key: "custom", mode: "custom", variant: null, name: "The Call Sheet", blurb: "your own cast, one turn each" },
   ];
 
@@ -86,6 +87,7 @@
     { mode: "v3", variant: "panel" },
     { mode: "v3", variant: "tribunal" },
     { mode: "bmad" },
+    { mode: "gemini" },
   ];
 
   const MAX_CAST = 5;

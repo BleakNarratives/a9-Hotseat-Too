@@ -1,19 +1,45 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 240" width="900" height="240">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 240" width="100%" height="240">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#140e0c"/>
-      <stop offset="55%" stop-color="#3b1116"/>
-      <stop offset="100%" stop-color="#7a1c24"/>
-    </linearGradient>
-    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#b8292f"/>
-      <stop offset="100%" stop-color="#e3a857"/>
+    <radialGradient id="pit" cx="50%" cy="55%" r="55%">
+      <stop offset="0%" stop-color="#e63946" stop-opacity="0.42">
+        <animate attributeName="stop-opacity" values="0.25;0.55;0.25" dur="3.4s" repeatCount="indefinite"/>
+      </stop>
+      <stop offset="65%" stop-color="#140d18" stop-opacity="0.92"/>
+      <stop offset="100%" stop-color="#070609" stop-opacity="1"/>
+    </radialGradient>
+    <linearGradient id="goldEdge" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#e63946"/>
+      <stop offset="50%" stop-color="#e9c46a"/>
+      <stop offset="100%" stop-color="#4cc9f0"/>
     </linearGradient>
   </defs>
-  <rect width="900" height="240" rx="12" fill="url(#bg)"/>
-  <rect x="28" y="28" width="844" height="184" rx="8" fill="none" stroke="#e3a857" stroke-opacity="0.35" stroke-width="1.5"/>
-  <rect x="48" y="54" width="8" height="132" rx="4" fill="url(#accent)"/>
-  <text x="76" y="102" fill="#f5e6cc" font-family="monospace" font-size="42" font-weight="bold" letter-spacing="3">HOTSEAT-TOO</text>
-  <text x="76" y="138" fill="#e3a857" font-family="monospace" font-size="16" letter-spacing="1.5">MULTI-PERSONA INTERROGATION &amp; AGENT ARENA ENGINE</text>
-  <text x="76" y="174" fill="#cbb799" font-family="monospace" font-size="13">Classic CLI  •  Web Arena (v2)  •  Agent &amp; Ollama Runner (v3)  •  FreeBuff Bridge</text>
+
+  <rect width="900" height="240" rx="16" fill="#070609"/>
+  <rect width="900" height="240" rx="16" fill="url(#pit)"/>
+  <rect x="1.5" y="1.5" width="897" height="237" rx="15" fill="none" stroke="url(#goldEdge)" stroke-width="2" stroke-opacity="0.7"/>
+
+  <ellipse cx="450" cy="148" rx="340" ry="56" fill="none" stroke="#e63946" stroke-opacity="0.38" stroke-width="1.5"/>
+  <ellipse cx="450" cy="148" rx="220" ry="34" fill="none" stroke="#e9c46a" stroke-opacity="0.45" stroke-width="1.2" stroke-dasharray="8 6">
+    <animateTransform attributeName="transform" type="rotate" from="0 450 148" to="360 450 148" dur="22s" repeatCount="indefinite"/>
+  </ellipse>
+
+  <circle cx="170" cy="140" r="8" fill="#e63946">
+    <animate attributeName="r" values="7;11;7" dur="2.2s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="300" cy="112" r="7" fill="#f4a261"/>
+  <circle cx="450" cy="102" r="9" fill="#e9c46a">
+    <animate attributeName="r" values="8;12;8" dur="2.9s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="600" cy="112" r="7" fill="#4cc9f0"/>
+  <circle cx="730" cy="140" r="8" fill="#2a9d8f"/>
+
+  <text x="450" y="64" text-anchor="middle" fill="#f1ece1" font-family="system-ui, -apple-system, sans-serif" font-size="34" font-weight="900" letter-spacing="8">
+    THE HOT SEAT
+  </text>
+  <text x="450" y="88" text-anchor="middle" fill="#e9c46a" font-family="monospace" font-size="12" letter-spacing="4">
+    ONE IDEA · FIVE ADVERSARIAL VOICES · ZERO FLUFF
+  </text>
+  <text x="450" y="212" text-anchor="middle" fill="#8e8999" font-family="monospace" font-size="11" letter-spacing="2">
+    LOCAL OLLAMA · GEMINI PANTHEON · OPENROUTER · SSE LIVE ARENA
+  </text>
 </svg>
