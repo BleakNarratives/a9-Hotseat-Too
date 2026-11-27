@@ -1,3 +1,20 @@
+from __future__ import annotations
+
+
+def _load_dotenv() -> None:
+    import os
+    from pathlib import Path as _P
+    for candidate in (_P(".env"), _P(__file__).resolve().parent.parent / ".env"):
+        if candidate.is_file():
+            for line in candidate.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+            break
+
+_load_dotenv()
+
 """Small unified chat-completion client for local and hosted providers.
 
 Provider credentials are resolved only when selection requires them. The module
@@ -10,7 +27,6 @@ touches the network, and labels every reply, so a UI can be built before any key
 exists.
 """
 
-from __future__ import annotations
 
 import json
 import os
@@ -58,12 +74,71 @@ class ProviderSpec:
     needs_key: bool = False
 
 
+
+def _autoload_concierge_vault() -> None:
+    import json, os
+    from pathlib import Path as _P
+    for vp in (_P.home() / ".concierge" / "vault.json", _P.home() / ".concierge" / "vault.v3.json"):
+        if vp.exists():
+            try:
+                raw = json.loads(vp.read_text(encoding="utf-8"))
+                merged = dict(raw) if isinstance(raw, dict) else {}
+                if isinstance(merged.get("keys"), dict):
+                    merged.update(merged["keys"])
+                aliases = {
+                    "GEMINI_API_KEY": ("GEMINI_API_KEY", "gemini_api_key", "gemini", "GOOGLE_API_KEY"),
+                    "OPENROUTER_API_KEY": ("OPENROUTER_API_KEY", "openrouter_api_key", "openrouter"),
+                    "XAI_API_KEY": ("XAI_API_KEY", "GROK_API_KEY", "xai", "grok"),
+                    "GROQ_API_KEY": ("GROQ_API_KEY", "groq"),
+                    "DEEPSEEK_API_KEY": ("DEEPSEEK_API_KEY", "deepseek"),
+                    "CEREBRAS_API_KEY": ("CEREBRAS_API_KEY", "cerebras"),
+                }
+                for target, keys in aliases.items():
+                    if not os.environ.get(target):
+                        for k in keys:
+                            v = merged.get(k)
+                            if isinstance(v, str) and v.strip():
+                                os.environ[target] = v.strip()
+                                break
+            except Exception:
+                pass
+
+_autoload_concierge_vault()
+
 PROVIDERS: dict[str, ProviderSpec] = {
     "9router": ProviderSpec(
         "9router", "http://127.0.0.1:20128/v1", ("NINEROUTER_API_KEY",), "openai/gpt-4o-mini"
     ),
     "ai_gateway": ProviderSpec(
         "ai_gateway", "http://127.0.0.1:7071/v1", ("AI_GATEWAY_API_KEY",), "openai/gpt-4o-mini"
+    ),
+    "xai": ProviderSpec(
+        "xai",
+        "https://api.x.ai/v1",
+        ("XAI_API_KEY", "GROK_API_KEY"),
+        "grok-3-mini",
+        needs_key=True,
+    ),
+    "groq": ProviderSpec(
+        "groq",
+        "https://api.groq.com/openai/v1",
+        ("GROQ_API_KEY",),
+        "openai/gpt-oss-120b",
+        needs_key=True,
+    ),
+    "deepseek": ProviderSpec(
+        "deepseek",
+        "https://api.deepseek.com/v1",
+        ("DEEPSEEK_API_KEY",),
+        "deepseek-chat",
+        needs_key=True,
+    ),
+    "cerebras": ProviderSpec(
+        "cerebras",
+        "https://api.cerebras.ai/v1",
+        ("CEREBRAS_API_KEY",),
+        "llama-3.3-70b",
+        needs_key=True,
     ),
     "openrouter": ProviderSpec(
         "openrouter",
@@ -76,7 +151,7 @@ PROVIDERS: dict[str, ProviderSpec] = {
         "gemini",
         "https://generativelanguage.googleapis.com/v1beta/openai",
         ("GEMINI_API_KEY",),
-        "gemini-3.8-flash",
+        "gemini-3.5-flash-lite",
         needs_key=True,
     ),
     "anthropic": ProviderSpec(
@@ -89,7 +164,7 @@ PROVIDERS: dict[str, ProviderSpec] = {
         "cerebras", "https://api.cerebras.ai/v1", ("CEREBRAS_API_KEY",), "gpt-oss-120b", needs_key=True
     ),
     "groq": ProviderSpec(
-        "groq", "https://api.groq.com/openai/v1", ("GROQ_API_KEY",), "openai/gpt-oss-120b", needs_key=True
+        "groq", "https://api.groq.com/openai/v1", ("GROQ_API_KEY",), "nvidia/nemotron-3.5-lightning:free", needs_key=True
     ),
     "ollama": ProviderSpec(
         "ollama", "http://127.0.0.1:11434", (), "llama3.2:1b", "ollama", False
