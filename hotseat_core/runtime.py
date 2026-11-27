@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import os
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -11,11 +13,12 @@ from typing import Any, Callable, Mapping, Sequence
 from .config import HotseatConfig
 from .engines import Engine, FollowUpEngine, Turn, build_engine, render_transcript
 from .personas import get_persona_set
-from .providers import ProviderClient, build_client
+from .providers import PROVIDERS, ProviderClient, build_client
 from .storage import SessionStore, StorageError
 
 EventEmitter = Callable[[dict[str, Any]], None]
 ClientFactory = Callable[[str, str | None], Any]
+logger = logging.getLogger(__name__)
 
 
 def _default_client_factory(provider: str, model: str | None) -> Any:
@@ -46,6 +49,8 @@ class SessionResult:
     provider: str = ""
     model: str | None = None
     fallback_used: bool = False
+    fallback_trail: list[str] = field(default_factory=list)
+    key: str | None = None
 
     def public(self) -> dict[str, Any]:
         return {
@@ -57,6 +62,8 @@ class SessionResult:
             "provider": self.provider,
             "model": self.model,
             "fallback_used": self.fallback_used,
+            "fallback_trail": list(self.fallback_trail),
+            "key": self.key,
             "transcript": self.transcript,
             "turns": [turn.public() for turn in self.turns],
         }
@@ -119,7 +126,14 @@ class HotseatRuntime:
                     + ", ".join(sorted(known))
                     + "."
                 )
-        client = self.client_factory(selected_provider, selected_model)
+        route_provider, route_model = self._seat_route(
+            persona_set,
+            selected_provider,
+            selected_model,
+            explicit_roles=bool(role_overrides),
+        )
+        engine_model = route_model or selected_model
+        client = self.client_factory(route_provider, route_model)
         merged_sampling: dict[str, Any] = {}
         configured_sampling = self.config.provider_options.get("sampling")
         if isinstance(configured_sampling, Mapping):
@@ -131,10 +145,43 @@ class HotseatRuntime:
             client,
             styles=styles if styles is not None else self.config.styles,
             system_directive=system_directive,
-            model=selected_model,
+            model=engine_model,
             sampling=merged_sampling,
             options=options,
         )
+
+    @staticmethod
+    def _seat_route(
+        persona_set: Any,
+        provider: str,
+        model: str | None,
+        *,
+        explicit_roles: bool = False,
+    ) -> tuple[str, str | None]:
+        """Optionally spread sessions across the active provider pools.
+
+        The key ring already rotates on every call and falls through on a
+        failure. This adds a session-level starting point so a busy install with
+        several free-tier keys does not put every session on the same provider.
+        """
+
+        if explicit_roles or model or (provider or "").strip().lower() not in {"", "auto"}:
+            return provider, model
+        enabled = os.environ.get("HOTSEAT_SEAT_ROUTER", "").strip().lower()
+        if enabled not in {"1", "true", "yes", "on"}:
+            return provider, model
+        try:
+            from .moe_router import pick_seat_route
+
+            route_provider, route_model = pick_seat_route(
+                persona_set.personas[0].key if persona_set.personas else "critic",
+                randomize=True,
+            )
+        except (ImportError, OSError, ValueError):
+            return provider, model
+        if route_provider in PROVIDERS and route_model:
+            return route_provider, route_model
+        return provider, model
 
     def run_session(
         self,
@@ -202,13 +249,21 @@ class HotseatRuntime:
             turns = engine.run(
                 topic, emit=emitter, stop_event=stop_event, injection=injection
             )
-        except Exception as exc:  # provider and unexpected failures alike
-            emitter({"type": "error", "session_id": session_id, "message": str(exc)})
+        except Exception:  # provider and unexpected failures alike
+            logger.exception("session failed session_id=%s mode=%s", session_id, mode)
+            emitter(
+                {
+                    "type": "error",
+                    "session_id": session_id,
+                    "message": "The room hit a snag. Give that case another try.",
+                }
+            )
             raise
 
         transcript = render_transcript(
             topic, turns, f"{engine.persona_set.mode}:{engine.persona_set.variant}"
         )
+        client = engine.client
         result = SessionResult(
             mode=engine.persona_set.mode,
             variant=engine.persona_set.variant or "default",
@@ -216,9 +271,11 @@ class HotseatRuntime:
             turns=turns,
             transcript=transcript,
             session_id=session_id,
-            provider=str(getattr(engine.client, "provider", provider_name)),
-            model=engine.model,
-            fallback_used=bool(getattr(engine.client, "fallback_used", False)),
+            provider=str(getattr(client, "provider", provider_name)),
+            model=getattr(client, "model", None) or engine.model,
+            fallback_used=bool(getattr(client, "fallback_used", False)),
+            fallback_trail=list(getattr(client, "attempts", []) or []),
+            key=str(getattr(client, "key_label", "") or "") or None,
         )
 
         if save and turns:
@@ -240,12 +297,13 @@ class HotseatRuntime:
                         "memory_id": result.memory_id,
                     }
                 )
-            except StorageError as exc:
+            except StorageError:
+                logger.exception("session memory was not saved session_id=%s", session_id)
                 emitter(
                     {
-                        "type": "error",
+                        "type": "status",
                         "session_id": session_id,
-                        "message": f"Session ran, but memory was not saved: {exc}",
+                        "message": "The room finished. This session was not saved.",
                     }
                 )
 
@@ -260,6 +318,8 @@ class HotseatRuntime:
                 "provider": result.provider,
                 "model": result.model,
                 "fallback_used": result.fallback_used,
+                "fallback_trail": result.fallback_trail,
+                "key": result.key,
                 "memory_id": result.memory_id,
                 "turns": [turn.public() for turn in turns],
                 "transcript": transcript,
@@ -291,6 +351,7 @@ class HotseatRuntime:
             raise ValueError(
                 "Unknown session. Follow-ups require a persisted session with a memory id."
             )
+        persisted_id = int(stored["id"]) if stored.get("id") is not None else None
 
         mode = str(stored.get("mode") or "classic")
         variant = "panel" if mode == "v3" else None
@@ -346,8 +407,17 @@ class HotseatRuntime:
             turns = engine.run(
                 instruction, emit=emitter, stop_event=stop_event, injection=injection
             )
-        except Exception as exc:
-            emitter({"type": "error", "session_id": session_id, "message": str(exc)})
+        except Exception:
+            logger.exception(
+                "follow-up failed session_id=%s memory_id=%s", session_id, persisted_id
+            )
+            emitter(
+                {
+                    "type": "error",
+                    "session_id": session_id,
+                    "message": "The room hit a snag. Give that follow-up another try.",
+                }
+            )
             raise
 
         all_turns = prior + turns
@@ -356,7 +426,6 @@ class HotseatRuntime:
             all_turns,
             f"{mode}:{persona_set.variant or 'default'}",
         )
-        persisted_id = int(stored["id"]) if stored.get("id") is not None else None
         try:
             if persisted_id is None:
                 raise StorageError("The session has no memory id.")
@@ -373,12 +442,13 @@ class HotseatRuntime:
                     "memory_id": persisted_id,
                 }
             )
-        except StorageError as exc:
+        except StorageError:
+            logger.exception("follow-up memory was not saved session_id=%s", session_id)
             emitter(
                 {
-                    "type": "error",
+                    "type": "status",
                     "session_id": session_id,
-                    "message": f"Follow-up ran, but the thread was not saved: {exc}",
+                    "message": "The room finished. This follow-up was not saved.",
                 }
             )
 
@@ -390,8 +460,11 @@ class HotseatRuntime:
             transcript=transcript,
             session_id=session_id,
             memory_id=persisted_id,
-            provider=str(provider_name),
-            model=selected_model,
+            provider=str(getattr(client, "provider", provider_name)),
+            model=getattr(client, "model", None) or selected_model,
+            fallback_used=bool(getattr(client, "fallback_used", False)),
+            fallback_trail=list(getattr(client, "attempts", []) or []),
+            key=str(getattr(client, "key_label", "") or "") or None,
         )
         emitter(
             {
@@ -403,6 +476,9 @@ class HotseatRuntime:
                 "topic": result.topic,
                 "provider": result.provider,
                 "model": result.model,
+                "fallback_used": result.fallback_used,
+                "fallback_trail": result.fallback_trail,
+                "key": result.key,
                 "memory_id": result.memory_id,
                 "iteration": 2,
                 "follow_up": True,

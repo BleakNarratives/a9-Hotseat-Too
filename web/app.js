@@ -65,7 +65,10 @@
       payload = null;
     }
     if (!response.ok) {
-      throw new Error((payload && payload.error) || "Request failed (" + response.status + ")");
+      if (response.status === 401) {
+        throw new Error("This room needs its access link. Reopen the shared URL with ?token=.");
+      }
+      throw new Error("The room didn't answer. Give it a moment and try again.");
     }
     return payload;
   }
@@ -75,6 +78,17 @@
     if (className) node.className = className;
     if (text !== undefined && text !== null) node.textContent = String(text);
     return node;
+  }
+
+  function cleanText(value) {
+    let text = String(value || "").replace(/\r\n/g, "\n");
+    text = text
+      .split("\n")
+      .filter((line) => !/^\s*[=\-_*~•·—–]{3,}\s*$/.test(line))
+      .join("\n")
+      .replace(/[ \t]+={1,}[ \t]+/g, " — ")
+      .replace(/(?:\s*(?:\.{2,}|…))+\s*$/g, "");
+    return text.replace(/\n{3,}/g, "\n\n").trim();
   }
 
   function clear(node) {
@@ -139,7 +153,7 @@
       modes = modeData.modes || [];
       providers = providerData.providers || [];
     } catch (error) {
-      showError("Could not load bridge metadata: " + error.message);
+      showError("The room is still waking up. Try again in a moment.");
     }
     try {
       const statusData = await api("/providers/status");
@@ -494,7 +508,7 @@
       renderScout(data.report);
       showError("");
     } catch (error) {
-      showError("Scout sweep failed: " + error.message);
+      showError("The scout wire is quiet right now. Try the sweep again.");
     } finally {
       button.disabled = false;
       button.textContent = original;
@@ -528,8 +542,8 @@
     clear(bracket);
     const copy = [
       "The seed takes the first chair. Three rivals are built on the spot.",
-      "The cheaper model is still in the hallway.",
-      "The premium model is polishing its invoice.",
+      "The cheaper option is still in the hallway.",
+      "The premium option is polishing its invoice.",
       "The niche wedge is hiding behind a trade magazine.",
     ];
     for (let index = 0; index < 4; index += 1) {
@@ -645,7 +659,7 @@
   function addTurn(turn) {
     const persona = String(turn.persona || "unknown");
     const speaker = String(turn.speaker || state.names[persona] || persona);
-    const content = String(turn.content || "");
+    const content = cleanText(turn.content || "");
     if (!content) return;
     removeStream(persona);
 
@@ -663,7 +677,7 @@
     }
     if (persona === "architect" || /architect/i.test(speaker)) setPanel("#architect-body", content);
     if (persona === "coroner" || /coroner/i.test(speaker)) setPanel("#coroner-body", content);
-    state.turns.push(turn);
+    state.turns.push({ ...turn, content });
     const turns = $("#turns");
     turns.scrollTop = turns.scrollHeight;
   }
@@ -671,7 +685,7 @@
   function addOperator(message) {
     const node = el("div", "turn operator");
     node.appendChild(el("div", "speaker", "OPERATOR // FOLLOW-UP"));
-    node.appendChild(el("div", "body", String(message || "")));
+    node.appendChild(el("div", "body", cleanText(message || "")));
     $("#turns").appendChild(node);
     $("#turns").scrollTop = $("#turns").scrollHeight;
   }
@@ -695,7 +709,6 @@
       "**Generated:** " + new Date().toISOString(),
       "**Session:** " + (state.sessionId || "unsaved"),
       "**Mode:** " + state.mode,
-      "**Provider:** " + (state.provider || "server config"),
       "**Topic:** " + (state.topic || "untitled"),
     ];
     if (state.constraints) lines.push("**Constraints:** " + state.constraints);
@@ -834,7 +847,7 @@
     } catch (error) {
       state.active = false;
       setStatus("FAULT", "error");
-      showError("Could not open the room: " + error.message);
+      showError("The room couldn't open that case. Give it another try.");
     } finally {
       button.disabled = false;
       button.textContent = "CONVENE THE ROOM";
@@ -905,7 +918,7 @@
     if (type === "token_chunk") {
       const persona = String(data.persona || "speaker");
       const stream = streamingTurn(persona, state.names[persona] || persona);
-      stream.body.textContent += String(data.text || "");
+      stream.body.textContent = cleanText(stream.body.textContent + String(data.text || ""));
       const turns = $("#turns");
       turns.scrollTop = turns.scrollHeight;
       return;
@@ -930,8 +943,8 @@
     }
     if (type === "error") {
       state.active = false;
-      showError(String(data.message || "The session failed."));
-      setStatus("FAULT", "error");
+      showError("The room is regrouping. Give it a moment, then try again.");
+      setStatus("READY", "done");
       closeSource();
       return;
     }
@@ -947,7 +960,7 @@
       $("#followup-input").disabled = false;
       $("#followup-button").disabled = false;
       setLiveFlag(false);
-      setStatus(data.fallback_used ? "VERDICT IN // FALLBACK" : "VERDICT IN", "done");
+      setStatus("VERDICT IN", "done");
       syncSessionScouts();
       if (data.memory_id) {
         $("#session-line").textContent =
@@ -977,7 +990,7 @@
       setStatus("REVISION", "live");
       connect(state.eventCount);
     } catch (error) {
-      showError("Follow-up rejected: " + error.message);
+      showError("The room couldn't take that follow-up. Try it once more.");
       button.disabled = false;
     }
   }

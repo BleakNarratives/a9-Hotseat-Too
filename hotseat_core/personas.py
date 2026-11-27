@@ -208,7 +208,7 @@ support."""
 V2 = (
     Persona(
         key="skeptic1",
-        name="Skeptic 1 — deepseek-r1",
+        name="Skeptic 1",
         system=SKEPTIC,
         model="deepseek/deepseek-r1:free",
         max_tokens=400,
@@ -219,7 +219,7 @@ V2 = (
     ),
     Persona(
         key="skeptic2",
-        name="Skeptic 2 — qwen coder",
+        name="Skeptic 2",
         system=SKEPTIC,
         model="qwen/qwen-2.5-coder-32b:free",
         max_tokens=400,
@@ -230,7 +230,7 @@ V2 = (
     ),
     Persona(
         key="skeptic3",
-        name="Skeptic 3 — gemini flash",
+        name="Skeptic 3",
         system=SKEPTIC,
         model="google/gemini-flash-1.5:free",
         max_tokens=400,

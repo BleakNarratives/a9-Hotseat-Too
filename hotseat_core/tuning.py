@@ -108,10 +108,32 @@ _BOILERPLATE_PREFIXES = (
 )
 
 
-def clean_response(text: str | None) -> str:
-    """Strip known conversational filler only at the beginning of a response."""
+_SEPARATOR_LINE = re.compile(r"^\s*(?:[=\-_*~•·—–]\s*){3,}$")
+_TRAILING_ELLIPSIS = re.compile(r"(?:\s*(?:\.{2,}|…))+\s*$")
+_INLINE_EQUALS = re.compile(r"[ \t]+={1,}[ \t]+")
 
-    cleaned = (text or "").strip()
+
+def clean_response(text: str | None) -> str:
+    """Remove model chrome that reads badly aloud, then strip filler prefixes.
+
+    Models like to close with ``...`` and separate sections with lines of ``=``,
+    ``-`` or ``*``. Both look like a truncation in a character card and get read
+    literally by speech synthesis. Drop separator-only lines and a trailing
+    ellipsis, keep ordinary sentence periods, and leave URL query strings alone.
+    """
+
+    cleaned = (text or "").replace("\r\n", "\n").strip()
+    lines: list[str] = []
+    for line in cleaned.split("\n"):
+        if _SEPARATOR_LINE.match(line):
+            continue
+        lines.append(_INLINE_EQUALS.sub(" — ", line).rstrip())
+    cleaned = "\n".join(lines).strip()
+    cleaned = re.sub(r"^\s*={2,}\s*", "", cleaned)
+    cleaned = re.sub(r"\s*={2,}\s*$", "", cleaned)
+    cleaned = _TRAILING_ELLIPSIS.sub("", cleaned).strip()
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+
     while cleaned:
         previous = cleaned
         for pattern in _BOILERPLATE_PREFIXES:
@@ -120,4 +142,4 @@ def clean_response(text: str | None) -> str:
                 break
         if cleaned == previous:
             break
-    return cleaned
+    return _TRAILING_ELLIPSIS.sub("", cleaned).strip()

@@ -12,9 +12,7 @@
   const followInput = $("#follow-input");
   const strip = $("#strip");
   const stamp = $("#stamp");
-  const note = $("#live-note");
   const gavel = $("#gavel");
-  const plaque = $("#house-plaque");
   const formatTrigger = $("#format-trigger");
   const castDrawer = $("#cast-drawer");
   const drawerClose = $("#drawer-close");
@@ -28,7 +26,6 @@
   const dialRoll = $("#dial-roll");
   const voiceButton = $("#voice");
   const micButton = $("#case-mic");
-  const caseHint = $("#case-hint");
   const wire = $("#wire");
   const wireDrawer = $("#wire-drawer");
   const wireClose = $("#wire-close");
@@ -148,9 +145,9 @@
     }
     if (!response.ok) {
       if (response.status === 401) {
-        throw new Error("Locked — attach ?token= to this URL.");
+        throw new Error("This room needs its access link. Reopen the shared URL with ?token=.");
       }
-      throw new Error((payload && payload.error) || "Bridge error (" + response.status + ").");
+      throw new Error("The room didn't answer. Give it a moment and try again.");
     }
     return payload;
   }
@@ -160,6 +157,19 @@
     if (className) node.className = className;
     if (text !== undefined && text !== null) node.textContent = String(text);
     return node;
+  }
+
+  // Match the server-side cleanup so streaming text cannot leave separator
+  // chrome, equals signs, or a fake truncation in the room or the voice track.
+  function cleanText(value) {
+    let text = String(value || "").replace(/\r\n/g, "\n");
+    text = text
+      .split("\n")
+      .filter((line) => !/^\s*[=\-_*~•·—–]{3,}\s*$/.test(line))
+      .join("\n")
+      .replace(/[ \t]+={1,}[ \t]+/g, " — ")
+      .replace(/(?:\s*(?:\.{2,}|…))+\s*$/g, "");
+    return text.replace(/\n{3,}/g, "\n\n").trim();
   }
 
   // ── Drawers ────────────────────────────────────────────────────────────────
@@ -383,7 +393,7 @@
 
   function readAloud(key, text, interrupt) {
     if (!window.speechSynthesis || !window.SpeechSynthesisUtterance || !text) return;
-    const spoken = String(text).replace(/[*_#`>]/g, "").replace(/\s+/g, " ").trim();
+    const spoken = cleanText(text).replace(/[*_#`>]/g, "").replace(/\s+/g, " ").trim();
     if (!spoken) return;
     if (interrupt) window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(spoken.slice(0, 1400));
@@ -572,7 +582,8 @@
 
       figure.addEventListener("click", () => {
         const line = state.lines[persona.key];
-        focusPersona(persona.key, line || `${persona.name} (${roleFor(persona.key)}) — waiting for the pitch.`);
+        if (line) focusPersona(persona.key, line);
+        else setIdleStatus("Pitch the case to hear " + persona.name + ".");
       });
 
       const rail = el("div", "heat-rail");
@@ -623,8 +634,13 @@
     speechStage.style.setProperty("--active-tone", tone);
     replayBtn.hidden = !state.lines[key];
 
-    activeSpeech.textContent = text || "";
-    activeSpeech.scrollTop = activeSpeech.scrollHeight;
+    // A status event marks the speaker without putting "X is speaking" in the
+    // character's mouth. Only real prose reaches the speech pane and the voice.
+    if (text !== null && text !== undefined) {
+      const clean = cleanText(text);
+      if (clean) activeSpeech.textContent = clean;
+      activeSpeech.scrollTop = activeSpeech.scrollHeight;
+    }
   }
 
   // ── Session Execution & SSE ────────────────────────────────────────────────
@@ -692,7 +708,8 @@
       }
       openStream();
     } catch (error) {
-      fail(error.message);
+      console.error("[hotseat] could not open case", error);
+      recover("The room couldn't open that case. Give it another try.");
     }
   }
 
@@ -723,7 +740,7 @@
       source.close();
       state.retries += 1;
       if (state.retries > 4) {
-        fail("Connection dropped. Reload to wake the host.");
+        recover("The room lost the thread. Pitch the case again.");
         return;
       }
       window.setTimeout(() => {
@@ -747,7 +764,7 @@
         break;
       case "status":
         if (state.demoPacing) break;
-        if (payload.persona) focusPersona(payload.persona, payload.message || "Thinking…", false);
+        if (payload.persona) focusPersona(payload.persona, null, false);
         break;
       case "token_chunk": {
         if (state.demoPacing) break;
@@ -757,7 +774,7 @@
           state.lines[key] = "";
           state.passSpeakers.add(key);
         }
-        state.lines[key] = (state.lines[key] || "") + (payload.text || "");
+        state.lines[key] = cleanText((state.lines[key] || "") + (payload.text || ""));
         focusPersona(key, state.lines[key], true);
         break;
       }
@@ -774,7 +791,10 @@
         state.passSpeakers.clear();
         break;
       case "error":
-        fail(payload.message || "Session error.");
+        // The server has already logged the technical failure. Never put a
+        // status code or provider name in the room; let the operator retry.
+        console.error("[hotseat] session error", payload && payload.message);
+        recover("The room is regrouping. Give it a moment, then pitch the case again.");
         break;
       case "session_end":
         state.done = true;
@@ -793,11 +813,13 @@
 
   function presentTurn(payload) {
     const key = payload.persona;
-    state.lines[key] = payload.content || state.lines[key] || "";
+    const text = cleanText(payload.content || state.lines[key] || "");
+    if (!text) return;
+    state.lines[key] = text;
     const actor = actorFor(key);
     if (actor) actor.classList.remove("speaking");
-    focusPersona(key, state.lines[key], false);
-    if (state.voice) readAloud(key, state.lines[key], false);
+    focusPersona(key, text, false);
+    if (state.voice) readAloud(key, text, false);
   }
 
   function drainTurns() {
@@ -840,7 +862,7 @@
     renderCallSheet();
   }
 
-  function fail(message) {
+  function recover(message) {
     state.done = true;
     state.active = false;
     state.turnQueue = [];
@@ -852,9 +874,10 @@
     closeStream();
     room.dataset.phase = "lobby";
     stopSpeech();
-    stamp.dataset.tone = "fault";
-    stamp.textContent = message || "FAULT";
-    stamp.hidden = false;
+    stamp.hidden = true;
+    followForm.hidden = true;
+    strip.hidden = true;
+    setIdleStatus(message || "The room is regrouping. Give it a moment.");
     renderProgram();
     renderCallSheet();
   }
@@ -884,7 +907,8 @@
       });
       openStream();
     } catch (error) {
-      fail(error.message);
+      console.error("[hotseat] could not send follow-up", error);
+      recover("The room couldn't take that follow-up. Try it once more.");
     }
   });
 
@@ -958,25 +982,13 @@
     URL.revokeObjectURL(url);
   });
 
-  async function loadHouse() {
+  async function detectHouse() {
     try {
       const data = await api("/providers/status");
-      const rows = data.providers || [];
-      const active = String(data.active || "").trim().toLowerCase();
-      state.houseProvider = active || "auto";
-      const cloud = rows.find((row) => row.configured && !row.local && !row.offline);
-      const demo = rows.find((row) => row.name === "demo" && row.configured);
-      const house =
-        active && active !== "auto"
-          ? active.toUpperCase()
-          : cloud
-            ? cloud.name.toUpperCase()
-            : demo
-              ? "DEMO"
-              : "UNSET";
-      plaque.textContent = "HOUSE · " + house;
+      state.houseProvider = String(data.active || "").trim().toLowerCase() || "auto";
     } catch (error) {
-      plaque.textContent = "HOUSE · OFFLINE";
+      // Provider metadata is for pacing only; it never belongs in the room copy.
+      state.houseProvider = "";
     }
   }
 
@@ -995,7 +1007,7 @@
     renderCast(cast);
     syncCallSheet(cast, state.format);
     renderDial();
-    loadHouse();
+    detectHouse();
   }
 
   boot();

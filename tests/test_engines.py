@@ -36,7 +36,8 @@ class EngineTests(unittest.TestCase):
         self.assertIn("persona_turn", types)
         self.assertIn("memory_saved", types)
         self.assertEqual(types[-1], "session_end")
-        self.assertIn("demo output", result.transcript)
+        self.assertNotIn("demo output", result.transcript)
+        self.assertNotIn("[no response]", result.transcript)
 
     def test_demo_reply_is_built_from_the_case_and_the_wire(self):
         from hotseat_core.providers import demo_response
@@ -57,7 +58,7 @@ class EngineTests(unittest.TestCase):
         )
         self.assertIn("a quote tool for roofers", reply)
         self.assertIn("$29/mo", reply)
-        self.assertIn("demo output", reply)
+        self.assertNotIn("demo output", reply)
 
     def test_v2_and_v3_variants(self):
         runtime = self.runtime()

@@ -113,9 +113,13 @@ Errors always have the shape:
 Credential readiness for every provider. Values are never included; keyed
 providers are `configured` only when a credential resolves from the environment,
 repo `.env`, or the Concierge vault. Local/demo providers need no key and are
-marked configured; reachability is not probed here. `active` is the provider the
-server will actually use for a session that does not override it (`auto` means
-the server picks), and `model` is its configured model override, if any.
+marked configured; reachability is not probed here. `key_count` is the number of
+keys in that provider's ring, and `endpoint_configured` is false when a custom
+provider still needs a base URL. A ring can be written as `PROVIDER_API_KEY`,
+`PROVIDER_API_KEY_2` ... or `PROVIDER_KEYS=key1,key2`; values are never echoed.
+`active` is the provider the server will
+actually use for a session that does not override it (`auto` means the server
+picks), and `model` is its configured model override, if any.
 
 ```json
 {
@@ -129,6 +133,8 @@ the server picks), and `model` is its configured model override, if any.
       "configured": true,
       "requires_key": true,
       "has_credential": true,
+      "key_count": 2,
+      "endpoint_configured": true,
       "credential_names": ["OPENROUTER_API_KEY", "OPENROUTER_KEY"],
       "local": false,
       "offline": false,
@@ -274,10 +280,14 @@ Starts a session in a background thread. Returns immediately.
 ```
 
 Only `mode` and `topic` are required. `mode` is `classic`, `v2`, `v3`, `bmad`,
-`arena`, or `custom`. `role_models` maps persona keys to models for this session
-and overrides manifest persona models; unknown keys are rejected by the runtime.
-Retryable provider failures fall through to the next configured cloud key
-automatically.
+`arena`, `gemini`, or `custom`. `role_models` maps persona keys to models for this
+session and overrides manifest persona models; unknown keys are rejected by the
+runtime. Retryable provider failures fall through to the next key, model, or
+provider automatically. A short `429` cools down only that key for its
+`Retry-After` window; a daily/billing limit parks it for the day. Successful
+turns rotate through the ring, so one key does not receive every call. Technical
+attempt details stay in the server log; the room receives prose, not provider
+names or status codes.
 
 `cast` is required for `custom` and ignored otherwise: one to eight `mode:key`
 ids drawn from the existing persona endpoints (`arena:producer`,
@@ -336,6 +346,8 @@ Polling fallback for clients without SSE. `since` is an event index.
     "provider": "demo",
     "model": null,
     "fallback_used": false,
+    "fallback_trail": [],
+    "key": null,
     "transcript": "# The Hot Seat\n…",
     "turns": [
       { "persona": "fixer", "speaker": "The Fixer", "content": "1. …", "round": 5, "model": "llama3.2:1b" }
@@ -347,8 +359,9 @@ Polling fallback for clients without SSE. `since` is an event index.
 }
 ```
 
-`result` is `null` until `done` is true. `error` is a string if the provider or
-engine failed; partial turns remain in `events`.
+`result` is `null` until `done` is true. `error` is a short, user-safe string if
+an unexpected failure ends the job; technical details are logged on the server.
+Partial turns remain in `events`.
 
 ### `GET /sessions/{id}/events?since=0` — SSE
 
@@ -408,14 +421,14 @@ Every event has `type`. All events except `token_chunk` are also retrievable fro
 | `type` | Payload |
 | :--- | :--- |
 | `session_start` | `session_id`, `timestamp`, `mode`, `variant`, `label`, `topic`, `provider`, `model`, `role_models`, `personas[]` (public persona objects) |
-| `status` | `message`, `persona`, `round` — UI spinners and “who is thinking” |
+| `status` | `message`, `persona`, `round`, optional `retrying` — UI spinners and “who is thinking”; never render this as a persona line |
 | `token_chunk` | `persona`, `text` — real streaming for OpenAI-compatible and Ollama; Anthropic sends one chunk |
 | `persona_turn` | `persona`, `speaker`, `content`, `round`, `model` — completed turn |
 | `memory_saved` | `session_id`, `path`, `memory_id` |
-| `error` | `session_id`, `message` — the session then ends; turns already produced are kept |
+| `error` | `session_id`, `message` — a user-safe message; the session then ends and turns already produced are kept. Provider details are server-log only. |
 | `operator_message` | `session_id`, `timestamp`, `message` — a threaded follow-up was accepted |
 | `iteration_start` | `session_id`, `timestamp`, `iteration`, `parent_turns` — follow-up pass begins |
-| `session_end` | `session_id`, `timestamp`, `mode`, `variant`, `topic`, `provider`, `model`, `fallback_used`, `memory_id`, `turns[]`, `transcript`, `stopped`; follow-ups add `follow_up` and `iteration` |
+| `session_end` | `session_id`, `timestamp`, `mode`, `variant`, `topic`, `provider`, `model`, `fallback_used`, `fallback_trail[]`, `key`, `memory_id`, `turns[]`, `transcript`, `stopped`; follow-ups add `follow_up` and `iteration` |
 
 `turns[]` entries are the same object as `persona_turn` without `type`.
 

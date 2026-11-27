@@ -29,23 +29,28 @@ exists.
 
 
 import json
+import logging
 import os
 import re
 import socket
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any, Callable, Mapping
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+logger = logging.getLogger(__name__)
 
 
 class ProviderError(RuntimeError):
     """A concise, user-safe provider selection or request failure.
 
-    ``retryable`` marks failures another provider might survive: rate limits,
-    billing/quota exhaustion, server errors, timeouts, and connection failures.
-    Bad credentials, malformed requests, and invalid responses stay fatal so
-    fallback cannot hide them.
+    ``retryable`` means another key, model, or provider might survive. A short
+    ``cooldown_seconds`` is different from ``exhausted``: a rate-limited key can
+    come back after its window, while a daily/billing limit should be skipped
+    for the rest of the session. The key itself is never included in the text.
     """
 
     def __init__(
@@ -54,11 +59,17 @@ class ProviderError(RuntimeError):
         *,
         status_code: int | None = None,
         retryable: bool | None = None,
+        kind: str = "unknown",
+        cooldown_seconds: float | None = None,
+        exhausted: bool = False,
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
+        self.kind = kind
+        self.cooldown_seconds = cooldown_seconds
+        self.exhausted = exhausted
         if retryable is None:
-            retryable = status_code in {402, 429} or (
+            retryable = status_code in {400, 401, 402, 403, 404, 408, 409, 422, 425, 429} or (
                 isinstance(status_code, int) and status_code >= 500
             )
         self.retryable = bool(retryable)
@@ -137,7 +148,7 @@ PROVIDERS: dict[str, ProviderSpec] = {
         "cerebras",
         "https://api.cerebras.ai/v1",
         ("CEREBRAS_API_KEY",),
-        "llama-3.3-70b",
+        "gpt-oss-120b",
         needs_key=True,
     ),
     "openrouter": ProviderSpec(
@@ -146,6 +157,9 @@ PROVIDERS: dict[str, ProviderSpec] = {
         ("OPENROUTER_API_KEY", "OPENROUTER_KEY"),
         "openai/gpt-4o-mini",
         needs_key=True,
+    ),
+    "openai": ProviderSpec(
+        "openai", "https://api.openai.com/v1", ("OPENAI_API_KEY",), "gpt-4o-mini", needs_key=True
     ),
     "gemini": ProviderSpec(
         "gemini",
@@ -160,11 +174,22 @@ PROVIDERS: dict[str, ProviderSpec] = {
     "mistral": ProviderSpec(
         "mistral", "https://api.mistral.ai/v1", ("MISTRAL_API_KEY",), "mistral-small-latest", needs_key=True
     ),
-    "cerebras": ProviderSpec(
-        "cerebras", "https://api.cerebras.ai/v1", ("CEREBRAS_API_KEY",), "gpt-oss-120b", needs_key=True
+    "fireworks": ProviderSpec(
+        "fireworks",
+        "https://api.fireworks.ai/inference/v1",
+        ("FIREWORKS_API_KEY",),
+        "accounts/fireworks/models/llama-v3p3-70b-instruct",
+        needs_key=True,
     ),
-    "groq": ProviderSpec(
-        "groq", "https://api.groq.com/openai/v1", ("GROQ_API_KEY",), "nvidia/nemotron-3.5-lightning:free", needs_key=True
+    "zen": ProviderSpec(
+        "zen",
+        "https://opencode.ai/zen/v1",
+        ("OPENCODE_API_KEY", "OPENCODE_ZEN_API_KEY", "ZEN_API_KEY"),
+        "deepseek-v4-flash-free",
+        needs_key=True,
+    ),
+    "custom": ProviderSpec(
+        "custom", "", ("CUSTOM_API_KEY", "BYOK_API_KEY"), "", needs_key=True
     ),
     "ollama": ProviderSpec(
         "ollama", "http://127.0.0.1:11434", (), "llama3.2:1b", "ollama", False
@@ -172,17 +197,22 @@ PROVIDERS: dict[str, ProviderSpec] = {
     "demo": ProviderSpec("demo", "", (), "hotseat-demo", "demo", False),
 }
 
-# Preference order for auto mode and fallback. Gemini is last because an
-# invalid Google key is a fatal 401; putting it earlier would stop the chain
-# before the working free-tier backups. An explicit --provider gemini still
-# selects it directly.
+# Preference order for auto mode and fallback. Gemini and custom sit last:
+# an invalid Google key should not stop the chain before working keys, and a
+# custom endpoint is opt-in. An explicit --provider still selects either first.
 _CLOUD_ORDER = (
     "openrouter",
+    "openai",
+    "xai",
+    "deepseek",
     "mistral",
     "cerebras",
     "groq",
+    "fireworks",
     "anthropic",
+    "zen",
     "gemini",
+    "custom",
 )
 
 PROVIDER_USER_AGENT = (
@@ -190,7 +220,12 @@ PROVIDER_USER_AGENT = (
 )
 _DEFAULT_MAX_TOKENS = 1024
 
-_DEMO_FOOTER = "\n\n_(demo output — no model was called)_"
+# Models often put ===, ----, or *** on their own line as section chrome.
+# Speech synthesis reads those literally, so drop the whole line. Only an
+# equals sign surrounded by whitespace is rewritten; URL query strings survive.
+_SEPARATOR_LINE = re.compile(r"^\s*(?:[=\-_*~•·—–]\s*){3,}$")
+_TRAILING_ELLIPSIS = re.compile(r"(?:\s*(?:\.{2,}|…))+\s*$")
+_INLINE_EQUALS = re.compile(r"[ \t]+={1,}[ \t]+")
 
 _CASE_RE = re.compile(r"The case on the table:\s*(.+?)\n", re.S)
 _SEED_RE = re.compile(r"Seed idea:\s*(.+?)\.\s*Constraints:", re.S)
@@ -236,7 +271,7 @@ _ROLES = (
 def _clean_topic(text: str, limit: int = 150) -> str:
     text = re.sub(r"\s+", " ", text or "").strip().strip("'\"")
     if len(text) > limit:
-        text = text[: limit - 1].rsplit(" ", 1)[0] + "…"
+        text = text[:limit].rsplit(" ", 1)[0].rstrip(" ,;:-")
     return text or "the idea"
 
 
@@ -483,7 +518,7 @@ def demo_response(system: str | None, messages: list[Mapping[str, str]]) -> str:
 
     system_text = system or ""
     ctx = _demo_context(system, messages)
-    return _demo_turn(_detect_role(system_text), system_text, ctx).strip() + _DEMO_FOOTER
+    return _demo_turn(_detect_role(system_text), system_text, ctx).strip()
 
 
 def _get_secret(key: str, secret_loader: Callable[[str, str], str] | None = None) -> str:
@@ -503,8 +538,139 @@ def _get_secret(key: str, secret_loader: Callable[[str, str], str] | None = None
 
 
 def _provider_url(spec: ProviderSpec) -> str:
-    override = os.environ.get(f"{spec.name.upper()}_BASE_URL", "").strip()
-    return (override or spec.base_url).rstrip("/")
+    for suffix in ("BASE_URL", "ENDPOINT", "URL"):
+        override = os.environ.get(f"{spec.name.upper()}_{suffix}", "").strip()
+        if override:
+            return override.rstrip("/")
+    if not spec.base_url:
+        raise ProviderError(
+            f"Provider '{spec.name}' needs an endpoint. Set "
+            f"{spec.name.upper()}_BASE_URL to an OpenAI-compatible /v1 URL."
+        )
+    return spec.base_url.rstrip("/")
+
+
+def _duration_seconds(value: str | None) -> float | None:
+    """Parse Retry-After's seconds/date and common rate-limit reset formats."""
+
+    if not value:
+        return None
+    raw = str(value).strip()
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        pass
+    try:
+        when = parsedate_to_datetime(raw)
+    except (TypeError, ValueError, OverflowError):
+        when = None
+    if when is not None:
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        return max(0.0, (when - datetime.now(timezone.utc)).total_seconds())
+    total = 0.0
+    units = {"s": 1.0, "m": 60.0, "h": 3600.0, "d": 86400.0}
+    for amount, unit in re.findall(r"(\d+(?:\.\d+)?)\s*([smhd])", raw.lower()):
+        total += float(amount) * units[unit]
+    return total or None
+
+
+def _retry_after_seconds(headers: Any) -> float | None:
+    """Read the first usable retry hint from an HTTP error response."""
+
+    if headers is None:
+        return None
+    for name in (
+        "Retry-After",
+        "retry-after",
+        "x-ratelimit-reset-requests",
+        "x-ratelimit-reset-tokens",
+        "x-ratelimit-reset",
+    ):
+        value = headers.get(name)
+        seconds = _duration_seconds(value)
+        if seconds is not None:
+            return seconds
+    return None
+
+
+def _looks_like_daily_limit(detail: str) -> bool:
+    text = (detail or "").lower()
+    return any(
+        marker in text
+        for marker in (
+            "daily",
+            "per day",
+            "per-day",
+            "today",
+            "24 hour",
+            "24-hour",
+            "day limit",
+            "insufficient_quota",
+            "billing",
+            "credit",
+            "budget",
+            "monthly",
+            "subscription",
+            "quota exceeded",
+        )
+    )
+
+
+def _looks_like_model_failure(detail: str) -> bool:
+    text = (detail or "").lower()
+    return any(
+        marker in text
+        for marker in (
+            "model",
+            "context length",
+            "maximum context",
+            "too many tokens",
+            "unsupported",
+            "does not exist",
+            "not found",
+            "no such",
+        )
+    )
+
+
+def _http_failure(provider: str, exc: HTTPError, detail: str) -> ProviderError:
+    """Turn one HTTP status into an actionable, secret-free failure."""
+
+    code = int(exc.code)
+    headers = getattr(exc, "headers", None)
+    reset = _retry_after_seconds(headers)
+    suffix = f": {detail}" if detail else ""
+    hint = ""
+    if code == 429:
+        if _looks_like_daily_limit(detail):
+            kind, cooldown, exhausted, hint = "daily_limit", None, True, " (daily limit)"
+        else:
+            kind, cooldown, exhausted = "cooldown", reset or 30.0, False
+            hint = f" (cooldown {int(cooldown)}s)"
+    elif code in {401, 403}:
+        kind, cooldown, exhausted = "auth", reset, False
+        hint = " (credential rejected; trying the next key)"
+    elif code == 402:
+        kind, cooldown, exhausted = "billing", None, True
+        hint = " (billing/credit exhausted)"
+    elif code in {400, 404, 422}:
+        kind = "model" if _looks_like_model_failure(detail) else "bad_request"
+        cooldown, exhausted = None, False
+    elif code in {408, 409, 425} or code >= 500:
+        kind, cooldown, exhausted = "server", reset or 5.0, False
+        hint = f" (retry in {int(cooldown)}s)"
+    else:
+        kind, cooldown, exhausted = "http", None, False
+    return ProviderError(
+        f"Provider '{provider}' returned HTTP {code}{suffix}.{hint}",
+        status_code=code,
+        kind=kind,
+        cooldown_seconds=cooldown,
+        exhausted=exhausted,
+        retryable=code in {400, 401, 402, 403, 404, 408, 409, 422, 425, 429}
+        or code >= 500,
+    )
 
 
 def probe_9router(timeout: float = 0.25, *, host: str = "127.0.0.1", port: int = 20128) -> bool:
@@ -517,15 +683,57 @@ def probe_9router(timeout: float = 0.25, *, host: str = "127.0.0.1", port: int =
         return False
 
 
+def _split_key_values(raw: str) -> list[str]:
+    """Allow one env var to hold a comma/newline-separated BYOK key ring."""
+
+    return [part.strip() for part in re.split(r"[\n,;]+", raw or "") if part.strip()]
+
+
+def _credential_pool(
+    spec: ProviderSpec,
+    secret_loader: Callable[[str, str], str] | None = None,
+) -> list[str]:
+    """Resolve every key for a provider without ever logging a value.
+
+    Supports ``PROVIDER_API_KEY``, ``PROVIDER_API_KEY_2`` ... and the plural
+    ``PROVIDER_KEYS`` form. Each value may itself be comma-separated, which makes
+    a free-tier key ring easy to keep in one environment variable.
+    """
+
+    values: list[str] = []
+    seen: set[str] = set()
+    for key_name in spec.credential_names:
+        candidates = [key_name]
+        candidates.extend(f"{key_name}_{slot}" for slot in range(2, 10))
+        base = re.sub(r"(_API)?_KEY$", "", key_name)
+        candidates.extend((f"{base}_KEYS", f"{base}_API_KEYS"))
+        for candidate in candidates:
+            raw = _get_secret(candidate, secret_loader)
+            for value in _split_key_values(raw):
+                if value not in seen:
+                    seen.add(value)
+                    values.append(value)
+    return values
+
+
+def _provider_usable(spec: ProviderSpec) -> bool:
+    try:
+        _provider_url(spec)
+    except ProviderError:
+        return False
+    return True
+
+
 def _configured_cloud_provider(
     secret_loader: Callable[[str, str], str] | None = None,
 ) -> tuple[str, str] | None:
     for name in _CLOUD_ORDER:
         spec = PROVIDERS[name]
-        for key_name in spec.credential_names:
-            key = _get_secret(key_name, secret_loader)
-            if key:
-                return name, key
+        if not _provider_usable(spec):
+            continue
+        pool = _credential_pool(spec, secret_loader)
+        if pool:
+            return name, pool[0]
     return None
 
 
@@ -537,7 +745,7 @@ def _configured_cloud_names(
     names: list[str] = []
     for name in _CLOUD_ORDER:
         spec = PROVIDERS[name]
-        if any(_get_secret(key_name, secret_loader) for key_name in spec.credential_names):
+        if _provider_usable(spec) and _credential_pool(spec, secret_loader):
             names.append(name)
     return names
 
@@ -550,23 +758,23 @@ def configured_providers(
     Keyed providers are ``configured`` only when a credential resolves from the
     environment, repo ``.env``, or the Concierge vault. Local and demo providers
     need no key and are always marked configured; reachability is a separate
-    question and is deliberately not probed here.
+    question and is deliberately not probed here. ``key_count`` is safe to show:
+    it says a key ring exists without identifying any key.
     """
 
     rows: list[dict[str, Any]] = []
     for name, spec in PROVIDERS.items():
-        has_key = False
-        if spec.needs_key:
-            has_key = any(
-                _get_secret(key_name, secret_loader)
-                for key_name in spec.credential_names
-            )
+        pool = _credential_pool(spec, secret_loader) if spec.needs_key else []
+        has_key = bool(pool)
+        usable = _provider_usable(spec)
         rows.append(
             {
                 "name": name,
-                "configured": (not spec.needs_key) or has_key,
+                "configured": (not spec.needs_key) or (has_key and usable),
                 "requires_key": spec.needs_key,
                 "has_credential": has_key,
+                "key_count": len(pool),
+                "endpoint_configured": usable,
                 "credential_names": list(spec.credential_names),
                 "local": name in {"9router", "ai_gateway", "ollama"},
                 "offline": name == "demo",
@@ -577,12 +785,12 @@ def configured_providers(
 
 
 class FallbackClient:
-    """Try a primary provider, then configured backups on retryable failures.
+    """Try keys, models, and providers in order until one answers.
 
-    The wrapper keeps the same ``complete`` contract as ``ProviderClient``. Once
-    a backup succeeds it becomes sticky for the rest of the session, avoiding a
-    rate-limited provider on every turn. Backup calls use the backup provider's
-    own default model unless the caller supplied a provider-neutral model.
+    A short rate limit puts that key to sleep for its cooldown; a daily or
+    billing limit puts it away for the rest of the session. Auth/model failures
+    move on immediately. The successful provider, key slot, and model remain on
+    the wrapper so the runtime can show exactly who answered.
     """
 
     def __init__(self, clients: list[Any]) -> None:
@@ -591,34 +799,129 @@ class FallbackClient:
         self.clients = list(clients)
         self.index = 0
         self.provider = str(getattr(self.clients[0], "provider", "unknown"))
+        self.key_label = str(getattr(self.clients[0], "key_label", "key 1"))
+        self.model: str | None = None
         self.fallback_used = False
         self.last_error: str | None = None
+        self.attempts: list[str] = []
+        self._initial_provider = self.provider
 
-    def _activate(self, index: int) -> None:
-        self.index = index
-        self.provider = str(getattr(self.clients[index], "provider", "unknown"))
+    def _activate(self, index: int, model: str | None = None) -> None:
+        # Advance to the next key/provider on the following turn. This spreads
+        # load across the ring instead of pinning every turn to the first key
+        # that happened to answer.
+        self.index = (index + 1) % len(self.clients)
+        client = self.clients[index]
+        self.provider = str(getattr(client, "provider", "unknown"))
+        self.key_label = str(getattr(client, "key_label", "key 1"))
+        self.model = model or getattr(client, "last_model", None)
+
+    def _label(self, client: Any, model: str | None) -> str:
+        provider = str(getattr(client, "provider", "unknown"))
+        key = str(getattr(client, "key_label", "key 1"))
+        return f"{provider} {key}" + (f" / {model}" if model else "")
+
+    @staticmethod
+    def _available(client: Any) -> bool:
+        check = getattr(client, "available", None)
+        return bool(check()) if callable(check) else True
+
+    def _models_for(self, client: Any, requested: str | None) -> list[str | None]:
+        # A model named for the primary provider is not portable. Backups use
+        # their own configured default (and optional fallback model list).
+        same_provider = str(getattr(client, "provider", "")) == self._initial_provider
+        default = getattr(client, "default_model", None)
+        default_name: str | None = None
+        if callable(default):
+            try:
+                default_name = default()
+            except ProviderError:
+                default_name = None
+        primary = requested if same_provider else None
+        models: list[str | None] = []
+        if primary:
+            models.append(primary)
+        if default_name and default_name not in models:
+            models.append(default_name)
+        if not models:
+            models.append(None)
+        fallback = getattr(client, "fallback_models", None)
+        if callable(fallback):
+            try:
+                candidates = fallback()
+            except ProviderError:
+                candidates = ()
+            for name in candidates:
+                if name and name not in models:
+                    models.append(name)
+        return models
+
+    @property
+    def fallback_trail(self) -> list[str]:
+        return list(self.attempts)
 
     def complete(self, **kwargs: Any) -> str:
         last: ProviderError | None = None
-        for index in range(self.index, len(self.clients)):
+        self.attempts.clear()
+        on_chunk = kwargs.get("on_chunk")
+        # If a provider dies halfway through a stream, switching providers would
+        # append a second answer to the partial one. Buffer the fallback chain and
+        # release only the winning stream; a single direct client still streams live.
+        buffered: list[str] | None = [] if callable(on_chunk) and len(self.clients) > 1 else None
+        order = list(range(self.index, len(self.clients))) + list(range(0, self.index))
+        for index in order:
             client = self.clients[index]
-            call = dict(kwargs)
-            if index != self.index:
-                # A model name from the primary provider may not exist elsewhere;
-                # let the backup choose its configured/default model.
-                call["model"] = None
-            try:
-                text = client.complete(**call)
-                self._activate(index)
-                return text
-            except ProviderError as exc:
-                last = exc
-                if not getattr(exc, "retryable", False):
-                    raise
+            if not self._available(client):
                 self.fallback_used = True
-                self.last_error = str(exc)
+                self.attempts.append(self._label(client, None) + " skipped (cooling down)")
                 continue
-        raise last or ProviderError("All configured providers failed.")
+            for model in self._models_for(client, kwargs.get("model")):
+                call = dict(kwargs)
+                call["model"] = model
+                if buffered is not None:
+                    buffered.clear()
+                    call["on_chunk"] = buffered.append
+                label = self._label(client, model)
+                try:
+                    text = client.complete(**call)
+                    self._activate(index, model)
+                    if buffered is not None and callable(on_chunk):
+                        for piece in buffered:
+                            on_chunk(piece)
+                    return text
+                except ProviderError as exc:
+                    last = exc
+                    self.last_error = str(exc)
+                    self.attempts.append(f"{label}: {exc}")
+                    logger.warning(
+                        "provider attempt failed provider=%s key=%s model=%s status=%s kind=%s",
+                        getattr(client, "provider", "unknown"),
+                        getattr(client, "key_label", "?"),
+                        model or "default",
+                        getattr(exc, "status_code", None),
+                        getattr(exc, "kind", "unknown"),
+                    )
+                    if not getattr(exc, "retryable", False):
+                        raise
+                    self.fallback_used = True
+                    # A key-level limit should move to the next key, not burn
+                    # the same key on every fallback model. A model/bad-request
+                    # failure is the one case worth trying another model.
+                    if getattr(exc, "kind", "unknown") in {
+                        "auth",
+                        "cooldown",
+                        "daily_limit",
+                        "billing",
+                        "server",
+                    }:
+                        break
+        summary = "; ".join(self.attempts[-8:]) or "no configured key answered"
+        logger.error("all provider attempts failed: %s", summary)
+        raise ProviderError(
+            f"All providers failed. {summary}",
+            retryable=True,
+            kind="all_failed",
+        )
 
 
 def build_client(
@@ -636,13 +939,37 @@ def build_client(
         return primary
 
     clients: list[Any] = [primary]
+    if requested in PROVIDERS:
+        pool = _credential_pool(PROVIDERS[requested], secret_loader)
+        for slot, key in enumerate(pool, start=1):
+            if getattr(primary, "api_key", None) == key:
+                continue
+            try:
+                clients.append(
+                    ProviderClient(
+                        requested,
+                        api_key=key,
+                        key_slot=slot,
+                        secret_loader=secret_loader,
+                    )
+                )
+            except ProviderError:
+                continue
     for name in _configured_cloud_names(secret_loader):
         if name == requested:
             continue
-        try:
-            clients.append(ProviderClient(name, secret_loader=secret_loader))
-        except ProviderError:
-            continue
+        for slot, key in enumerate(_credential_pool(PROVIDERS[name], secret_loader), start=1):
+            try:
+                clients.append(
+                    ProviderClient(
+                        name,
+                        api_key=key,
+                        key_slot=slot,
+                        secret_loader=secret_loader,
+                    )
+                )
+            except ProviderError:
+                continue
     return FallbackClient(clients) if len(clients) > 1 else primary
 
 
@@ -655,9 +982,9 @@ def resolve_provider(
     """Resolve an explicit provider, or probe local 9router first in auto mode.
 
     In auto mode, when 9router is not listening, configured cloud credentials are
-    checked in a deterministic order. If none are available, OpenRouter is selected
-    and its missing-key error is reported on the first request. No credential is
-    loaded for an unselected explicit provider.
+    checked in a deterministic order. If none are available, the demo provider
+    keeps the room open with in-character prose. No credential is loaded for an
+    unselected explicit provider.
     """
 
     requested = (provider or "auto").strip().lower()
@@ -668,7 +995,10 @@ def resolve_provider(
         if cloud:
             name, key = cloud
             return ProviderClient(name, api_key=key, secret_loader=secret_loader)
-        return ProviderClient("openrouter", secret_loader=secret_loader)
+        # A room with no keys should still open with in-character demo prose
+        # rather than a credential error. The warning stays in the server log.
+        logger.warning("No cloud provider credential found; using the demo provider.")
+        return ProviderClient("demo", secret_loader=secret_loader)
 
     if requested not in PROVIDERS and requested != "ai-gateway":
         choices = ", ".join(("auto", *PROVIDERS.keys()))
@@ -686,27 +1016,73 @@ class ProviderClient:
     api_key: str | None = None
     timeout: float = 30.0
     retries: int = 1
+    key_slot: int = 1
+    key_label: str = ""
     secret_loader: Callable[[str, str], str] | None = field(default=None, repr=False)
     spec: ProviderSpec = field(init=False, repr=False)
     base_url: str = field(init=False, repr=False)
+    cooldown_until: float = field(default=0.0, init=False)
+    exhausted_until: float = field(default=0.0, init=False)
+    last_model: str | None = field(default=None, init=False)
+    last_error: str | None = field(default=None, init=False)
 
     def __post_init__(self) -> None:
         if self.provider not in PROVIDERS:
             raise ProviderError(f"Unknown provider '{self.provider}'.")
         self.spec = PROVIDERS[self.provider]
-        self.base_url = _provider_url(self.spec)
+        self.base_url = "" if self.spec.protocol == "demo" else _provider_url(self.spec)
+        if self.spec.needs_key:
+            self.key_label = self.key_label or f"key {self.key_slot}"
         if self.api_key is None and self.spec.needs_key:
             self.api_key = self._load_selected_key()
 
     def _load_selected_key(self) -> str:
-        for key_name in self.spec.credential_names:
-            key = _get_secret(key_name, self.secret_loader)
-            if key:
-                return key
+        pool = _credential_pool(self.spec, self.secret_loader)
+        if pool:
+            return pool[0]
         raise ProviderError(
             f"Provider '{self.provider}' requires a credential. Set "
             f"{' or '.join(self.spec.credential_names)} in the environment or ~/.concierge/vault.json."
         )
+
+    def available(self) -> bool:
+        """False while a key is cooling down or has spent a daily budget."""
+
+        return time.time() >= max(self.cooldown_until, self.exhausted_until)
+
+    def default_model(self) -> str:
+        model = (
+            os.environ.get(f"{self.provider.upper()}_MODEL", "").strip()
+            or self.spec.default_model
+        )
+        if not model:
+            raise ProviderError(
+                f"Provider '{self.provider}' needs a model. Set "
+                f"{self.provider.upper()}_MODEL for this endpoint.",
+                retryable=True,
+                kind="model",
+            )
+        return model
+
+    def fallback_models(self) -> tuple[str, ...]:
+        raw = os.environ.get(f"{self.provider.upper()}_FALLBACK_MODELS", "")
+        primary = os.environ.get(f"{self.provider.upper()}_MODEL", "") or self.spec.default_model
+        return tuple(
+            model.strip()
+            for model in raw.split(",")
+            if model.strip() and model.strip() != primary
+        )
+
+    def _record_failure(self, exc: ProviderError) -> None:
+        self.last_error = str(exc)
+        now = time.time()
+        if exc.status_code in {401, 403} and not exc.cooldown_seconds:
+            # A bad or unauthorized key should not be touched again this session.
+            self.cooldown_until = now + 3600
+        elif exc.cooldown_seconds:
+            self.cooldown_until = now + max(1.0, float(exc.cooldown_seconds))
+        if exc.exhausted:
+            self.exhausted_until = now + 86400
 
     # ── public API ────────────────────────────────────────────────────────────
     def complete(
@@ -725,25 +1101,25 @@ class ProviderClient:
         chunk so callers get one consistent contract.
         """
 
-        selected_model = (
-            model
-            or os.environ.get(f"{self.provider.upper()}_MODEL")
-            or self.spec.default_model
-        )
+        selected_model = model or self.default_model()
         options = dict(sampling or {})
 
         if self.spec.protocol == "demo":
             text = demo_response(system, messages)
+            self.last_model = selected_model
             if on_chunk:
                 on_chunk(text)
             return text
 
         if on_chunk is None or self.spec.protocol == "anthropic":
             text = self._complete_once(messages, selected_model, system, options)
+            self.last_model = selected_model
             if on_chunk:
                 on_chunk(text)
             return text
-        return self._complete_stream(messages, selected_model, system, options, on_chunk)
+        text = self._complete_stream(messages, selected_model, system, options, on_chunk)
+        self.last_model = selected_model
+        return text
 
     # ── request bodies ────────────────────────────────────────────────────────
     def _request_parts(
@@ -887,7 +1263,9 @@ class ProviderClient:
             return str(data["choices"][0]["message"].get("content", "")).strip()
         except (KeyError, IndexError, TypeError) as exc:
             raise ProviderError(
-                f"Provider '{self.provider}' returned an unexpected response format."
+                f"Provider '{self.provider}' returned an unexpected response format.",
+                retryable=True,
+                kind="response",
             ) from exc
 
     def _complete_stream(
@@ -914,19 +1292,20 @@ class ProviderClient:
                         on_chunk(piece)
         except HTTPError as exc:
             detail = self._http_error_detail(exc)
-            suffix = f": {detail}" if detail else ""
-            raise ProviderError(
-                f"Provider '{self.provider}' returned HTTP {exc.code}{suffix}.",
-                status_code=exc.code,
-                retryable=exc.code in {402, 429} or exc.code >= 500,
-            ) from None
+            failure = _http_failure(self.provider, exc, detail)
+            self._record_failure(failure)
+            raise failure from None
         except (URLError, TimeoutError, socket.timeout, ConnectionError, OSError) as exc:
             reason = getattr(exc, "reason", None) or exc
             raise ProviderError(
                 f"Could not reach provider '{self.provider}': {reason}.", retryable=True
             ) from None
         except ValueError as exc:
-            raise ProviderError(f"Provider '{self.provider}' returned invalid stream data: {exc}.") from None
+            raise ProviderError(
+                f"Provider '{self.provider}' returned invalid stream data: {exc}.",
+                retryable=True,
+                kind="response",
+            ) from None
         return "".join(chunks).strip()
 
     def _parse_stream_line(self, line: str) -> str | None:
@@ -972,20 +1351,23 @@ class ProviderClient:
                 with urlopen(request, timeout=max(0.1, float(self.timeout))) as response:
                     parsed = json.loads(response.read().decode("utf-8"))
                     if not isinstance(parsed, dict):
-                        raise ProviderError(f"Provider '{self.provider}' returned invalid JSON data.")
+                        raise ProviderError(
+                            f"Provider '{self.provider}' returned invalid JSON data.",
+                            retryable=True,
+                            kind="response",
+                        )
                     return parsed
             except HTTPError as exc:
-                # Retry rate limits and transient server errors, but not client errors.
-                if attempt + 1 < attempts and (exc.code == 429 or exc.code >= 500):
+                # Only transient server errors are worth a quick same-key retry.
+                # A rate limit must move to the next key immediately instead of
+                # making the user wait through the cooldown.
+                if attempt + 1 < attempts and exc.code >= 500:
                     time.sleep(min(0.2 * (2**attempt), 1.0))
                     continue
                 detail = self._http_error_detail(exc)
-                suffix = f": {detail}" if detail else ""
-                raise ProviderError(
-                    f"Provider '{self.provider}' returned HTTP {exc.code}{suffix}.",
-                    status_code=exc.code,
-                    retryable=exc.code in {402, 429} or exc.code >= 500,
-                ) from None
+                failure = _http_failure(self.provider, exc, detail)
+                self._record_failure(failure)
+                raise failure from None
             except (URLError, TimeoutError, socket.timeout, ConnectionError, OSError) as exc:
                 if attempt + 1 < attempts:
                     time.sleep(min(0.2 * (2**attempt), 1.0))
@@ -995,7 +1377,11 @@ class ProviderClient:
                     f"Could not reach provider '{self.provider}': {reason}.", retryable=True
                 ) from None
             except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-                raise ProviderError(f"Provider '{self.provider}' returned invalid JSON: {exc}.") from None
+                raise ProviderError(
+                    f"Provider '{self.provider}' returned invalid JSON: {exc}.",
+                    retryable=True,
+                    kind="response",
+                ) from None
         raise ProviderError(f"Provider '{self.provider}' request failed after retries.")
 
 

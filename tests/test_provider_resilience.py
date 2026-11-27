@@ -7,19 +7,24 @@ import urllib.request
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
+from urllib.error import HTTPError
 
 from hotseat_core.bridge import Bridge, serve
 from hotseat_core.config import load_config
 from hotseat_core.providers import (
+    PROVIDERS,
     FallbackClient,
     ProviderClient,
     ProviderError,
+    _credential_pool,
+    _http_failure,
     available_providers,
     build_client,
     configured_providers,
 )
 from hotseat_core.runtime import HotseatRuntime
 from hotseat_core.storage import SessionStore
+from hotseat_core.tuning import clean_response
 
 
 class FailingClient:
@@ -48,7 +53,211 @@ class WorkingClient:
         return "backup answer"
 
 
+class OutputCleanupTests(unittest.TestCase):
+    def test_separator_chrome_and_trailing_ellipsis_are_removed(self):
+        cleaned = clean_response("The point stands.\n=====\nPrice = $29\nWait...")
+        self.assertIn("The point stands.", cleaned)
+        self.assertIn("Price — $29", cleaned)
+        self.assertNotIn("====", cleaned)
+        self.assertNotIn("...", cleaned)
+        self.assertTrue(cleaned.endswith("Wait"))
+
+    def test_ordinary_periods_and_url_queries_survive(self):
+        cleaned = clean_response("See https://example.test/?a=b. Keep the period.")
+        self.assertIn("https://example.test/?a=b", cleaned)
+        self.assertTrue(cleaned.endswith("Keep the period."))
+
+
+class ProviderFailureClassificationTests(unittest.TestCase):
+    @staticmethod
+    def failure(code, detail, headers=None):
+        error = HTTPError("https://example.test", code, "failure", headers or {}, None)
+        return _http_failure("test", error, detail)
+
+    def test_short_429_uses_cooldown_and_retry_after(self):
+        error = self.failure(429, "rate limit per minute", {"Retry-After": "12"})
+        self.assertEqual(error.kind, "cooldown")
+        self.assertEqual(error.cooldown_seconds, 12)
+        self.assertFalse(error.exhausted)
+        self.assertTrue(error.retryable)
+
+    def test_daily_429_is_marked_exhausted(self):
+        error = self.failure(429, "daily token budget exhausted")
+        self.assertEqual(error.kind, "daily_limit")
+        self.assertTrue(error.exhausted)
+        self.assertTrue(error.retryable)
+
+    def test_400_403_429_are_retryable(self):
+        for code in (400, 403, 429):
+            self.assertTrue(self.failure(code, "no").retryable, code)
+        self.assertEqual(self.failure(400, "model not found").kind, "model")
+        self.assertEqual(self.failure(403, "invalid api key").kind, "auth")
+
+    def test_server_error_has_a_short_cooldown(self):
+        error = self.failure(503, "upstream unavailable", {"Retry-After": "3"})
+        self.assertEqual(error.kind, "server")
+        self.assertEqual(error.cooldown_seconds, 3)
+
+
+class KeyRingTests(unittest.TestCase):
+    def test_key_ring_reads_numbered_and_comma_separated_values(self):
+        secrets = {
+            "OPENROUTER_API_KEY": "one, two",
+            "OPENROUTER_API_KEY_2": "three",
+            "OPENROUTER_KEYS": "four",
+        }
+
+        def loader(key, default=""):
+            return secrets.get(key, default)
+
+        with patch.dict(os.environ, {}, clear=True):
+            pool = _credential_pool(PROVIDERS["openrouter"], loader)
+        self.assertEqual(pool, ["one", "two", "three", "four"])
+
+    def test_new_byok_providers_are_listed(self):
+        names = {row["name"] for row in available_providers()}
+        for name in ("openai", "anthropic", "fireworks", "zen", "custom"):
+            self.assertIn(name, names)
+
+    def test_byok_endpoints_are_openai_compatible(self):
+        self.assertEqual(ProviderClient("openai", api_key="x").base_url, "https://api.openai.com/v1")
+        self.assertEqual(ProviderClient("zen", api_key="x").base_url, "https://opencode.ai/zen/v1")
+        self.assertEqual(
+            ProviderClient("fireworks", api_key="x").base_url,
+            "https://api.fireworks.ai/inference/v1",
+        )
+
+    def test_custom_provider_requires_an_endpoint(self):
+        with patch.dict(os.environ, {"CUSTOM_API_KEY": "test-key"}, clear=True):
+            with self.assertRaises(ProviderError):
+                ProviderClient("custom")
+        with patch.dict(
+            os.environ,
+            {"CUSTOM_API_KEY": "test-key", "CUSTOM_BASE_URL": "https://example.test/v1"},
+            clear=True,
+        ):
+            self.assertEqual(ProviderClient("custom").base_url, "https://example.test/v1")
+
+    def test_build_client_adds_the_next_key_for_the_same_provider(self):
+        secrets = {
+            "OPENROUTER_API_KEY": "first",
+            "OPENROUTER_API_KEY_2": "second",
+        }
+
+        def loader(key, default=""):
+            return secrets.get(key, default)
+
+        with patch.dict(os.environ, {}, clear=True):
+            client = build_client("openrouter", "model", secret_loader=loader)
+        self.assertIsInstance(client, FallbackClient)
+        self.assertEqual([c.provider for c in client.clients], ["openrouter", "openrouter"])
+        self.assertEqual([c.key_label for c in client.clients], ["key 1", "key 2"])
+
+
 class ProviderFallbackTests(unittest.TestCase):
+    def test_successful_ring_rotates_to_the_next_client(self):
+        first = WorkingClient(provider="first")
+        second = WorkingClient(provider="second")
+        client = FallbackClient([first, second])
+        self.assertEqual(client.complete(messages=[]), "backup answer")
+        self.assertEqual(client.provider, "first")
+        self.assertEqual(client.complete(messages=[]), "backup answer")
+        self.assertEqual(client.provider, "second")
+        self.assertEqual(len(first.calls), 1)
+        self.assertEqual(len(second.calls), 1)
+
+    def test_default_models_are_the_live_ones(self):
+        self.assertEqual(PROVIDERS["groq"].default_model, "openai/gpt-oss-120b")
+        self.assertEqual(PROVIDERS["cerebras"].default_model, "gpt-oss-120b")
+
+    def test_fallback_trail_names_the_failed_key_and_provider(self):
+        primary = FailingClient(provider="openrouter", status=429)
+        primary.key_label = "key 1"
+        backup = WorkingClient(provider="groq")
+        backup.key_label = "key 2"
+        client = FallbackClient([primary, backup])
+        self.assertEqual(client.complete(messages=[]), "backup answer")
+        self.assertEqual(client.provider, "groq")
+        self.assertEqual(client.key_label, "key 2")
+        self.assertTrue(any("openrouter key 1" in item for item in client.fallback_trail))
+
+    def test_cooling_key_is_skipped_without_being_called(self):
+        class Cooling:
+            provider = "openrouter"
+            key_label = "key 1"
+
+            def __init__(self):
+                self.calls = 0
+
+            def available(self):
+                return False
+
+            def complete(self, **kwargs):
+                self.calls += 1
+                return "wrong"
+
+        primary = Cooling()
+        backup = WorkingClient()
+        client = FallbackClient([primary, backup])
+        self.assertEqual(client.complete(messages=[]), "backup answer")
+        self.assertEqual(primary.calls, 0)
+        self.assertTrue(any("skipped" in item for item in client.fallback_trail))
+
+    def test_a_failed_stream_is_not_released_before_the_winner(self):
+        class Partial:
+            provider = "openrouter"
+            key_label = "key 1"
+
+            def complete(self, *, on_chunk=None, **kwargs):
+                if on_chunk:
+                    on_chunk("partial")
+                raise ProviderError("limit", status_code=429, retryable=True, kind="cooldown")
+
+        class Whole:
+            provider = "groq"
+            key_label = "key 1"
+
+            def complete(self, *, on_chunk=None, **kwargs):
+                if on_chunk:
+                    on_chunk("whole")
+                return "whole"
+
+        pieces = []
+        client = FallbackClient([Partial(), Whole()])
+        self.assertEqual(client.complete(messages=[], on_chunk=pieces.append), "whole")
+        self.assertEqual(pieces, ["whole"])
+
+    def test_model_failure_tries_the_next_model_before_the_next_provider(self):
+        class ModelFail:
+            provider = "openrouter"
+            key_label = "key 1"
+
+            def __init__(self):
+                self.calls = []
+
+            def default_model(self):
+                return "primary-model"
+
+            def fallback_models(self):
+                return ("backup-model",)
+
+            def complete(self, *, model=None, **kwargs):
+                self.calls.append(model)
+                if model == "primary-model":
+                    raise ProviderError(
+                        "model not found",
+                        status_code=400,
+                        retryable=True,
+                        kind="model",
+                    )
+                return "model answer"
+
+        primary = ModelFail()
+        client = FallbackClient([primary])
+        self.assertEqual(client.complete(messages=[]), "model answer")
+        self.assertEqual(primary.calls, ["primary-model", "backup-model"])
+        self.assertEqual(client.model, "backup-model")
+
     def test_429_falls_back_with_the_backup_default_model(self):
         primary = FailingClient()
         backup = WorkingClient()
@@ -201,6 +410,87 @@ class RoleModelTests(unittest.TestCase):
                 role_models={"nobody": "model"},
                 save=False,
             )
+
+    def test_seat_router_can_pick_the_session_provider_and_model(self):
+        captured = []
+
+        class Capture:
+            provider = "capture"
+
+            def complete(self, **_kwargs):
+                return "ok"
+
+        runtime = HotseatRuntime(
+            self.config,
+            store=self.store,
+            client_factory=lambda provider, model: captured.append((provider, model))
+            or Capture(),
+        )
+        with patch.dict(os.environ, {"HOTSEAT_SEAT_ROUTER": "1"}), patch(
+            "hotseat_core.moe_router.pick_seat_route",
+            return_value=("groq", "route-model"),
+        ):
+            runtime.build_engine("classic", provider="auto")
+        self.assertEqual(captured[0], ("groq", "route-model"))
+
+    def test_provider_failure_never_leaves_a_blank_or_status_code_card(self):
+        class AlwaysFail:
+            provider = "openrouter"
+            key_label = "key 1"
+
+            def complete(self, *, messages, model=None, system=None, sampling=None, on_chunk=None):
+                raise ProviderError(
+                    "Provider returned HTTP 429.",
+                    status_code=429,
+                    retryable=True,
+                    kind="cooldown",
+                )
+
+        events = []
+        runtime = HotseatRuntime(
+            self.config,
+            store=self.store,
+            client_factory=lambda provider, model: AlwaysFail(),
+        )
+        with patch("hotseat_core.engines.base.time.sleep", return_value=None):
+            result = runtime.run_session(
+                "classic", "a provider outage", emit=events.append, save=False
+            )
+        self.assertEqual(len(result.turns), 3)
+        for turn in result.turns:
+            self.assertTrue(turn.content.strip())
+            self.assertNotIn("HTTP", turn.content)
+            self.assertNotIn("429", turn.content)
+            self.assertNotIn("[no response]", turn.content)
+        self.assertFalse(any(event["type"] == "error" for event in events))
+
+    def test_session_end_carries_the_answering_key_and_trail(self):
+        class TrailClient:
+            provider = "groq"
+            key_label = "key 2"
+            model = "fallback-model"
+            fallback_used = True
+            attempts = ["openrouter key 1: HTTP 429 (cooldown 30s)"]
+
+            def complete(self, *, messages, model=None, system=None, sampling=None, on_chunk=None):
+                if on_chunk:
+                    on_chunk("ok")
+                return "ok"
+
+        events = []
+        runtime = HotseatRuntime(
+            self.config,
+            store=self.store,
+            client_factory=lambda provider, model: TrailClient(),
+        )
+        result = runtime.run_session("classic", "a trail", emit=events.append, save=False)
+        self.assertEqual(result.provider, "groq")
+        self.assertEqual(result.key, "key 2")
+        self.assertEqual(result.model, "fallback-model")
+        self.assertIn("openrouter key 1", result.fallback_trail[0])
+        end = next(event for event in events if event["type"] == "session_end")
+        self.assertEqual(end["key"], "key 2")
+        self.assertEqual(end["fallback_trail"], result.fallback_trail)
 
 
 class ProviderStatusBridgeTests(unittest.TestCase):

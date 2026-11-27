@@ -20,6 +20,9 @@
 
 ---
 
+> **Working on this next?** Read [HANDOFF.md](HANDOFF.md) for the current
+> architecture, verified state, known blockers, and deployment/cron steps.
+
 ## Casts & Arena Modes
 
 <details open>
@@ -66,6 +69,35 @@
 Open `http://localhost:8000` in your browser (attach `?token=YOUR_TOKEN` if auth is enabled).
 
 ---
+
+## Provider Key Rings & Quiet Fallback
+
+Put as many free-tier keys as you have in `.env` (or the host's environment). The
+server reads a ring per provider and never prints a key value:
+
+```sh
+OPENROUTER_API_KEY=first-key
+OPENROUTER_API_KEY_2=second-key
+OPENROUTER_API_KEY_3=third-key
+OPENROUTER_KEYS=fourth-key,fifth-key
+```
+
+The same pattern works for every provider (`GROQ_API_KEY_2`, `CEREBRAS_KEYS`,
+etc.). Short rate limits cool down only that key; daily or billing limits park it
+for the session. Successful turns rotate through the ring, and failures move to
+the next key, model, or provider without putting a status code in the room.
+
+Optional controls:
+
+* `HOTSEAT_SEAT_ROUTER=1` rotates the session's starting provider across the
+  active pools. It is on in `render.yaml` and off by default elsewhere.
+* `OPENROUTER_MODEL` (or the matching `GROQ_MODEL`, `CEREBRAS_MODEL`, etc.)
+  sets that provider's primary model.
+* `OPENROUTER_FALLBACK_MODELS` accepts a comma-separated model ring.
+
+Technical failures are logged on the server. The room waits, retries, and keeps
+each character seat filled instead of rendering `ERROR 4xx`, a blank turn, or a
+provider/model label in the spoken transcript.
 
 ## Support the Project
 

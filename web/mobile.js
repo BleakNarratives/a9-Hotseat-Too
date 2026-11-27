@@ -14,6 +14,7 @@
     "operator_message",
     "iteration_start",
     "memory_saved",
+    "error",
     "session_end",
   ];
 
@@ -79,7 +80,10 @@
       payload = null;
     }
     if (!response.ok) {
-      throw new Error((payload && payload.error) || "Request failed (" + response.status + ")");
+      if (response.status === 401) {
+        throw new Error("This room needs its access link. Reopen the shared URL with ?token=.");
+      }
+      throw new Error("The room didn't answer. Give it a moment and try again.");
     }
     return payload;
   }
@@ -89,6 +93,17 @@
     if (className) node.className = className;
     if (text !== undefined && text !== null) node.textContent = String(text);
     return node;
+  }
+
+  function cleanText(value) {
+    let text = String(value || "").replace(/\r\n/g, "\n");
+    text = text
+      .split("\n")
+      .filter((line) => !/^\s*[=\-_*~•·—–]{3,}\s*$/.test(line))
+      .join("\n")
+      .replace(/[ \t]+={1,}[ \t]+/g, " — ")
+      .replace(/(?:\s*(?:\.{2,}|…))+\s*$/g, "");
+    return text.replace(/\n{3,}/g, "\n\n").trim();
   }
 
   function clear(node) {
@@ -172,7 +187,7 @@
       modes = modeData.modes || [];
       providers = providerData.providers || [];
     } catch (error) {
-      showError("Could not load bridge metadata: " + error.message);
+      showError("The room is still waking up. Try again in a moment.");
     }
     try {
       const statusData = await api("/providers/status");
@@ -521,7 +536,7 @@
       renderScout(data.report);
       showError("");
     } catch (error) {
-      showError("Scout sweep failed: " + error.message);
+      showError("The scout wire is quiet right now. Try the sweep again.");
     } finally {
       button.disabled = false;
       button.textContent = original;
@@ -563,7 +578,7 @@
 
   function setSpotlight(name, text) {
     if (name) $("#spotlight-speaker").textContent = String(name);
-    if (text !== undefined) $("#spotlight-text").textContent = String(text || "");
+    if (text !== undefined) $("#spotlight-text").textContent = cleanText(text);
   }
 
   function resetContenders() {
@@ -571,8 +586,8 @@
     clear(box);
     const copy = [
       "The seed takes the first chair.",
-      "The cheaper model is still in the hallway.",
-      "The premium model is polishing its invoice.",
+      "The cheaper option is still in the hallway.",
+      "The premium option is polishing its invoice.",
       "The niche wedge is hiding behind a trade magazine.",
     ];
     for (let index = 0; index < 4; index += 1) {
@@ -647,11 +662,12 @@
   }
 
   function setPanel(selector, text) {
-    state.panels[selector] = String(text || "");
+    const cleaned = cleanText(text);
+    state.panels[selector] = cleaned;
     const node = $(selector);
     if (!node) return;
     clear(node);
-    const paragraphs = String(text || "").split(/\n{2,}/).filter((part) => part.trim());
+    const paragraphs = cleaned.split(/\n{2,}/).filter((part) => part.trim());
     if (!paragraphs.length) {
       node.appendChild(el("p", "muted", "No output."));
       return;
@@ -689,7 +705,7 @@
   function addTurn(turn) {
     const persona = String(turn.persona || "unknown");
     const speaker = String(turn.speaker || state.names[persona] || persona);
-    const content = String(turn.content || "");
+    const content = cleanText(turn.content || "");
     if (!content) return;
     removeStream(persona);
 
@@ -716,7 +732,7 @@
     }
     if (persona === "coroner" || /coroner/i.test(speaker)) setPanel("#verdict-autopsy", content);
 
-    state.turns.push(turn);
+    state.turns.push({ ...turn, content });
     setSpotlight(speaker, content);
     setProgress(persona, true);
     $("#mobile-turns").scrollTop = $("#mobile-turns").scrollHeight;
@@ -725,7 +741,7 @@
   function addOperator(message) {
     const node = el("div", "turn operator");
     node.appendChild(el("div", "speaker", "OPERATOR // FOLLOW-UP"));
-    node.appendChild(el("div", "body", String(message || "")));
+    node.appendChild(el("div", "body", cleanText(message || "")));
     $("#mobile-turns").appendChild(node);
     $("#mobile-turns").scrollTop = $("#mobile-turns").scrollHeight;
   }
@@ -833,7 +849,7 @@
       state.active = false;
       setStatus("FAULT", "error");
       setScreen("setup");
-      showError("Could not open the room: " + error.message);
+      showError("The room couldn't open that case. Give it another try.");
     } finally {
       button.disabled = false;
       button.textContent = "CONVENE THE ROOM";
@@ -911,7 +927,7 @@
     if (type === "token_chunk") {
       const persona = String(data.persona || "speaker");
       const stream = streamingTurn(persona, state.names[persona] || persona);
-      stream.body.textContent += String(data.text || "");
+      stream.body.textContent = cleanText(stream.body.textContent + String(data.text || ""));
       setSpotlight(state.names[persona] || persona, stream.body.textContent);
       setProgress(persona, false);
       const turns = $("#mobile-turns");
@@ -937,14 +953,15 @@
     }
     if (type === "error") {
       state.active = false;
-      setStatus("FAULT", "error");
-      showError(String(data.message || "The session failed."));
+      setStatus("READY", "done");
+      showError("The room is regrouping. Give it a moment, then try again.");
       closeSource();
       return;
     }
     if (type === "session_end") {
       state.active = false;
       state.done = true;
+      state.provider = data.provider || state.provider;
       closeSource();
       state.turns = [];
       state.panels = {};
@@ -953,7 +970,7 @@
       if (!(data.turns || []).length) {
         $("#mobile-turns").appendChild(el("p", "muted", "Session ended without turns."));
       }
-      setStatus(data.fallback_used ? "VERDICT // FALLBACK" : "VERDICT IN", "done");
+      setStatus("VERDICT IN", "done");
       $("#live-flag").hidden = true;
       $("#followup-button").disabled = false;
       renderWinner();
@@ -1007,7 +1024,7 @@
       setScreen("live");
       connect(state.eventCount);
     } catch (error) {
-      showError("Follow-up rejected: " + error.message);
+      showError("The room couldn't take that follow-up. Try it once more.");
       button.disabled = false;
     }
   }
@@ -1024,7 +1041,6 @@
       "**Generated:** " + new Date().toISOString(),
       "**Session:** " + (state.sessionId || "unsaved"),
       "**Mode:** " + state.mode,
-      "**Provider:** " + (state.provider || "server config"),
       "**Topic:** " + (state.topic || "untitled"),
     ];
     const constraints = state.constraintsText;

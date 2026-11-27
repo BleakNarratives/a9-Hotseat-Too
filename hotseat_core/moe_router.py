@@ -27,7 +27,7 @@ ROLE_POOLS: dict[str, list[tuple[str, str]]] = {
     "producer": [
         ("openrouter", "openrouter/free"),
         ("groq", "openai/gpt-oss-120b"),
-        ("cerebras", "llama-3.3-70b"),
+        ("cerebras", "gpt-oss-120b"),
         ("gemini", "gemini-3.5-flash-lite"),
     ],
     "foreman": [
@@ -45,7 +45,7 @@ ROLE_POOLS: dict[str, list[tuple[str, str]]] = {
     "coroner": [
         ("xai", "grok-3-mini"),
         ("openrouter", "nvidia/nemotron-3-ultra:free"),
-        ("groq", "llama-3.1-8b-instant"),
+        ("groq", "openai/gpt-oss-120b"),
         ("gemini", "gemini-3.5-flash-lite"),
     ],
 }
@@ -100,5 +100,7 @@ def pick_seat_route(role_key: str, *, randomize: bool = False) -> tuple[str, str
     ]
     candidates = [(prov, mod) for prov, mod in pool if prov in active]
     if not candidates:
-        candidates = [("gemini", "gemini-3.5-flash-lite")]
+        # Do not invent a provider with no credential; let the normal auto
+        # selector report readiness and use its own fallback chain.
+        return ("", "")
     return random.choice(candidates) if randomize else candidates[0]

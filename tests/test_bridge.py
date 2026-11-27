@@ -177,7 +177,8 @@ class BridgeTests(unittest.TestCase):
             with urllib.request.urlopen(request, timeout=5) as response:
                 modes = json.loads(response.read())["modes"]
             self.assertEqual(
-                {m["mode"] for m in modes}, {"classic", "v2", "v3", "bmad", "arena"}
+                {m["mode"] for m in modes},
+                {"classic", "v2", "v3", "bmad", "arena", "gemini"},
             )
 
             payload = json.dumps({"mode": "v2", "topic": "http idea"}).encode()
@@ -243,8 +244,8 @@ class BridgeTests(unittest.TestCase):
         base = f"http://127.0.0.1:{server.server_address[1]}"
         try:
             checks = [
-                ("/", "text/html", "THE TABLE", "case-file"),
-                ("/table", "text/html", "THE TABLE", "case-file"),
+                ("/", "text/html", "THE HOT SEAT", "case-file"),
+                ("/table", "text/html", "THE HOT SEAT", "case-file"),
                 ("/table/", "text/html", "table.css", "table.js"),
                 ("/console", "text/html", "SCOUT WIRE", "SET THE TABLE"),
                 ("/table.css", "text/css", ".actor", "prefers-reduced-motion"),

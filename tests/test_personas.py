@@ -69,8 +69,8 @@ class PersonaTests(unittest.TestCase):
 
     def test_custom_cast_resolves_mode_prefixed_keys(self):
         roster = cast_roster()
-        self.assertEqual(len(roster), 25)
-        self.assertEqual(len({member["id"] for member in roster}), 25)
+        self.assertEqual(len(roster), 29)
+        self.assertEqual(len({member["id"] for member in roster}), 29)
         cast = get_persona_set(
             "custom",
             cast=["arena:producer", "bmad:architect", "arena:architect"],
