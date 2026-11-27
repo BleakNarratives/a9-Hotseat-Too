@@ -2,134 +2,116 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>THE TABLE — The Hot Seat</title>
-  <meta name="description" content="Five characters, one idea, no dashboard. The Hot Seat arena as a room you can talk to.">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="theme-color" content="#070608">
+  <title>THE HOT SEAT — Live Arena</title>
   <link rel="stylesheet" href="/table.css">
 </head>
 <body>
   <div class="room" id="room" data-phase="lobby">
-    <header class="room-head">
-      <p class="kicker">THE HOT SEAT <span>//</span> THE TABLE</p>
-      <nav class="room-nav" aria-label="Other views">
-        <a href="/console" data-view-link>WAR ROOM</a>
-        <a href="/m" data-view-link>COMPANION</a>
-      </nav>
-      <p class="plaque" id="house-plaque">HOUSE MODEL · …</p>
+    <div class="bg-grid" aria-hidden="true"></div>
+    <div class="bg-vignette" aria-hidden="true"></div>
+
+    <!-- Top minimal telemetry bar -->
+    <header class="hud-top">
+      <div class="brand-lockup">
+        <span class="pulse-dot" id="status-dot"></span>
+        <span class="brand-title">THE HOT SEAT</span>
+        <span class="plaque" id="house-plaque">HOUSE · …</span>
+      </div>
+
+      <div class="hud-actions">
+        <button class="pill-btn" id="format-trigger" type="button" aria-expanded="false" aria-controls="cast-drawer">
+          <span class="pill-kicker">CAST</span>
+          <strong id="program-name">The Arena</strong>
+        </button>
+        <button class="pill-btn wire-pill" id="wire" type="button" aria-expanded="false" hidden>
+          <span class="pill-kicker">WIRE</span>
+          <strong id="wire-count">0</strong>
+        </button>
+        <a class="ghost-nav" href="/console" data-view-link title="War Room Console">CONSOLE</a>
+      </div>
     </header>
 
-    <div class="console">
-    <details class="program" id="program">
-      <summary>
-        <span class="program-kicker">TONIGHT’S FORMAT</span>
-        <strong id="program-name">The Arena</strong>
-      </summary>
-      <ul class="program-list" id="program-list"></ul>
-      <div class="call-sheet" id="call-sheet">
+    <!-- Slide-down Cast & Call Sheet Drawer (only opens when tapped) -->
+    <aside class="drawer" id="cast-drawer" hidden>
+      <div class="drawer-inner">
+        <div class="drawer-head">
+          <span>FORMAT &amp; CALL SHEET (MAX 5)</span>
+          <button class="drawer-close" id="drawer-close" type="button">DONE</button>
+        </div>
+        <div class="program-pills" id="program-list"></div>
         <div class="call-head">
-          <span class="program-kicker">CALL SHEET</span>
+          <span>CUSTOM ROSTER</span>
           <strong id="call-count">5 called</strong>
         </div>
         <div class="call-list" id="call-list"></div>
       </div>
-    </details>
+    </aside>
 
-    <div class="dial-card" id="dial-card">
-      <div class="dial-head">
-        <span class="program-kicker">DIAL</span>
-        <output id="dial-value" for="dial">7</output>
+    <!-- Scout Wire Popover -->
+    <aside class="wire-drawer" id="wire-drawer" hidden>
+      <div class="drawer-head">
+        <span id="wire-note">SCOUT WIRE</span>
+        <button class="drawer-close" id="wire-close" type="button">CLOSE</button>
       </div>
-      <input id="dial" type="range" min="0" max="11" step="1" value="7"
-             aria-label="Panel intensity, zero to eleven">
-      <div class="dial-foot">
-        <span id="dial-label">loose</span>
-        <button id="dial-roll" type="button" title="Roll a random setting">ROLL</button>
+      <div class="wire-list" id="wire-list"></div>
+    </aside>
+
+    <!-- 3D Spatial Arena Stage -->
+    <main class="arena-viewport">
+      <div class="arena-3d">
+        <div class="floor-plane" aria-hidden="true">
+          <div class="orbit-ring outer"></div>
+          <div class="orbit-ring inner"></div>
+          <div class="pit-core"></div>
+        </div>
+        <div class="cast" id="cast" aria-label="The boardroom"></div>
       </div>
-      <button class="voice" id="voice" type="button" aria-pressed="false">🔇 VOICE OFF</button>
-    </div>
-    </div>
 
-    <button class="wire" id="wire" type="button" aria-expanded="false" hidden>
-      <span class="wire-kicker">THE WIRE</span>
-      <strong id="wire-count">sweeping…</strong>
-      <span class="wire-note" id="wire-note">scouts on the case</span>
-      <span class="wire-list" id="wire-list"></span>
-    </button>
+      <!-- Center Active Speaker / Pit Readout -->
+      <section class="speech-stage" id="speech-stage" aria-live="polite">
+        <div class="speech-header" id="speech-header">
+          <span class="speaker-badge" id="active-speaker">STANDBY</span>
+          <span class="speaker-role" id="active-role">select a cast or pitch the pit</span>
+          <button class="replay-btn" id="replay-btn" type="button" hidden title="Read this turn aloud">🔊</button>
+        </div>
+        <div class="speech-body" id="active-speech">
+          <p class="idle-prompt" id="live-note">One idea. Five voices. Zero fluff. Pitch the room below.</p>
+        </div>
+        <p class="stamp" id="stamp" hidden></p>
+      </section>
+    </main>
 
-    <div class="table-scene" aria-hidden="true">
-      <svg viewBox="0 0 1200 620" preserveAspectRatio="xMidYMid slice">
-        <defs>
-          <radialGradient id="lamp" cx="50%" cy="8%" r="70%">
-            <stop offset="0" stop-color="#ffe4a8" stop-opacity=".42"/>
-            <stop offset="1" stop-color="#ffe4a8" stop-opacity="0"/>
-          </radialGradient>
-          <radialGradient id="felt" cx="46%" cy="32%" r="82%">
-            <stop offset="0" stop-color="#35795a"/>
-            <stop offset=".62" stop-color="#1f5039"/>
-            <stop offset="1" stop-color="#153c2b"/>
-          </radialGradient>
-          <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stop-color="#8a6a33"/>
-            <stop offset="1" stop-color="#4b3718"/>
-          </linearGradient>
-        </defs>
-        <ellipse cx="600" cy="512" rx="565" ry="112" fill="#08120d" opacity=".85"/>
-        <ellipse cx="600" cy="352" rx="452" ry="206" fill="url(#rim)"/>
-        <ellipse cx="600" cy="342" rx="430" ry="190" fill="url(#felt)"/>
-        <ellipse cx="600" cy="338" rx="392" ry="158" fill="none" stroke="#4f9170" stroke-width="2" opacity=".45"/>
-        <ellipse cx="600" cy="120" rx="560" ry="300" fill="url(#lamp)"/>
-        <text x="600" y="98" text-anchor="middle" fill="#e8c57a" opacity=".11"
-              font-family="Georgia, 'Times New Roman', serif" font-size="50" letter-spacing="16">THE TABLE</text>
-        <g transform="translate(470 300) rotate(-7)" opacity=".9">
-          <rect width="150" height="96" rx="3" fill="#efe3c8" stroke="#c8b894" stroke-width="2"/>
-          <path d="M18 26h92M18 42h66M18 58h78" stroke="#bda98a" stroke-width="4" stroke-linecap="round"/>
-        </g>
-        <g transform="translate(690 290) rotate(6)" opacity=".8">
-          <rect width="126" height="84" rx="3" fill="#e7d9ba" stroke="#c8b894" stroke-width="2"/>
-          <path d="M16 24h82M16 40h54M16 56h70" stroke="#bda98a" stroke-width="4" stroke-linecap="round"/>
-        </g>
-        <g transform="translate(600 276)">
-          <ellipse cx="0" cy="18" rx="48" ry="13" fill="#0f2c20"/>
-          <rect x="-30" y="-2" width="60" height="14" rx="7" fill="#1b1710" stroke="#d9a441" stroke-width="2"/>
-          <rect x="-17" y="-32" width="34" height="28" rx="14" fill="#2a2418" stroke="#d9a441" stroke-width="2"/>
-          <line x1="0" y1="-32" x2="0" y2="-46" stroke="#d9a441" stroke-width="2"/>
-          <circle cx="0" cy="-50" r="3" fill="#d9a441"/>
-          <circle class="on-air" cx="0" cy="5" r="3" fill="#4a1b16"/>
-        </g>
-        <g transform="translate(806 334)" opacity=".82">
-          <ellipse cx="0" cy="10" rx="26" ry="7" fill="#0f2c20"/>
-          <path d="M-14 -4h28l-4 16h-20z" fill="#efe3c8" stroke="#c8b894" stroke-width="2"/>
-          <path d="M18 -2h6v10h-6z" fill="none" stroke="#c8b894" stroke-width="2"/>
-          <path d="M-6 -10c-3-8 5-8 2-16M6 -10c-3-8 5-8 2-16" fill="none" stroke="#e8ddc0" stroke-width="2" stroke-linecap="round" opacity=".35"/>
-        </g>
-      </svg>
-    </div>
+    <!-- Bottom Direct-Manipulation Dock -->
+    <footer class="hud-dock">
+      <div class="dial-strip">
+        <label class="dial-meta" for="dial">
+          <span>HEAT</span>
+          <output id="dial-value" for="dial">7</output>
+          <em id="dial-label">loose</em>
+        </label>
+        <input id="dial" type="range" min="0" max="11" step="1" value="7" aria-label="Panel intensity, zero to eleven">
+        <button class="mini-ctrl" id="dial-roll" type="button" title="Randomize heat">🎲</button>
+        <button class="mini-ctrl" id="voice" type="button" aria-pressed="false" title="Toggle voice read-aloud">🔇</button>
+        <button class="mini-ctrl" id="strip" type="button" hidden title="Download Markdown transcript">⬇ MD</button>
+        <button class="mini-ctrl gavel-btn" id="gavel" type="button" aria-label="Stop or clear session" title="Stop or clear">🔨</button>
+      </div>
 
-    <div class="cast" id="cast" aria-label="The boardroom"></div>
-
-    <form class="case-file" id="case-file" autocomplete="off">
-      <label class="case-label" for="case-input">CASE FILE 001 — THE IDEA</label>
-      <div class="case-row">
+      <form class="case-file" id="case-file" autocomplete="off">
+        <button class="mic-btn" id="case-mic" type="button" aria-pressed="false" aria-label="Dictate" title="Voice to text">🎙</button>
         <input id="case-input" name="topic" type="text" maxlength="400" required
-               placeholder="Pitch the room. Press return." aria-describedby="case-hint">
-        <button class="mic" id="case-mic" type="button" aria-pressed="false"
-                aria-label="Dictate the case" title="Dictate the case">🎙</button>
-      </div>
-      <span class="case-hint" id="case-hint">one idea, five turns, no panel to fill in</span>
-    </form>
+               placeholder="Pitch the room. Press return…" aria-describedby="case-hint">
+        <button class="send-btn" id="send-btn" type="submit">IGNITE</button>
+      </form>
 
-    <button class="gavel" id="gavel" type="button" aria-label="Stop the session" title="Stop the session">🔨</button>
-
-    <form class="follow-up" id="follow-up" autocomplete="off" hidden>
-      <label class="case-label" for="follow-input">A HAND GOES UP</label>
-      <input id="follow-input" name="message" type="text" maxlength="400" required
-             placeholder="Ask the room one more thing.">
-    </form>
-
-    <button class="strip" id="strip" type="button" hidden>TEAR OFF THE TRANSCRIPT</button>
-
-    <p class="stamp" id="stamp" hidden aria-live="polite"></p>
-    <p class="live-note" id="live-note" aria-live="polite"></p>
+      <form class="follow-up" id="follow-up" autocomplete="off" hidden>
+        <input id="follow-input" name="message" type="text" maxlength="400" required
+               placeholder="Challenge the verdict or ask one more thing…">
+        <button class="send-btn" type="submit">PUSH BACK</button>
+      </form>
+      <span class="sr-only" id="case-hint"></span>
+    </footer>
   </div>
   <script src="/table.js"></script>
 </body>

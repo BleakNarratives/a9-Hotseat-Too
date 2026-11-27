@@ -1,5 +1,4 @@
-/* THE TABLE — the room is the interface.
-   One case file, five characters, speech bubbles. Zero dependencies. */
+/* THE TABLE — 3D Spatial Stage wired to hotseat_core/bridge.py */
 
 (function () {
   "use strict";
@@ -16,7 +15,9 @@
   const note = $("#live-note");
   const gavel = $("#gavel");
   const plaque = $("#house-plaque");
-  const program = $("#program");
+  const formatTrigger = $("#format-trigger");
+  const castDrawer = $("#cast-drawer");
+  const drawerClose = $("#drawer-close");
   const programName = $("#program-name");
   const programList = $("#program-list");
   const callCount = $("#call-count");
@@ -29,9 +30,16 @@
   const micButton = $("#case-mic");
   const caseHint = $("#case-hint");
   const wire = $("#wire");
+  const wireDrawer = $("#wire-drawer");
+  const wireClose = $("#wire-close");
   const wireCount = $("#wire-count");
   const wireNote = $("#wire-note");
   const wireList = $("#wire-list");
+  const speechStage = $("#speech-stage");
+  const activeSpeaker = $("#active-speaker");
+  const activeRole = $("#active-role");
+  const activeSpeech = $("#active-speech");
+  const replayBtn = $("#replay-btn");
 
   const EVENT_TYPES = [
     "session_start",
@@ -54,40 +62,12 @@
   };
 
   const FALLBACK_CAST = [
-    { key: "producer", name: "The Producer", emoji: "🎬", color: "#b8292f" },
-    { key: "critic", name: "The Critic", emoji: "🔪", color: "#e3a857" },
-    { key: "foreman", name: "The Foreman", emoji: "🔔", color: "#f5e6cc" },
-    { key: "architect", name: "The Architect", emoji: "📐", color: "#219ebc" },
-    { key: "coroner", name: "The Coroner", emoji: "🥼", color: "#8ecae6" },
+    { key: "producer", name: "The Producer", emoji: "🎬", color: "#e63946" },
+    { key: "critic", name: "The Critic", emoji: "🔪", color: "#f4a261" },
+    { key: "foreman", name: "The Foreman", emoji: "🔔", color: "#e9c46a" },
+    { key: "architect", name: "The Architect", emoji: "📐", color: "#2a9d8f" },
+    { key: "coroner", name: "The Coroner", emoji: "🥼", color: "#4cc9f0" },
   ];
-
-  const SEATS = {
-    2: [
-      { left: 31, top: 56, side: "left", row: "middle" },
-      { left: 69, top: 56, side: "right", row: "middle" },
-    ],
-    1: [
-      { left: 50, top: 52, side: "center", row: "middle" },
-    ],
-    5: [
-      { left: 7, top: 47, side: "left", row: "middle" },
-      { left: 28, top: 72, side: "left", row: "bottom" },
-      { left: 50, top: 16, side: "center", row: "top" },
-      { left: 72, top: 72, side: "right", row: "bottom" },
-      { left: 93, top: 47, side: "right", row: "middle" },
-    ],
-    4: [
-      { left: 12, top: 50, side: "left", row: "middle" },
-      { left: 37, top: 72, side: "left", row: "bottom" },
-      { left: 63, top: 72, side: "right", row: "bottom" },
-      { left: 88, top: 50, side: "right", row: "middle" },
-    ],
-    3: [
-      { left: 17, top: 58, side: "left", row: "bottom" },
-      { left: 50, top: 16, side: "center", row: "top" },
-      { left: 83, top: 58, side: "right", row: "bottom" },
-    ],
-  };
 
   const PROGRAM = [
     { key: "arena", mode: "arena", variant: null, name: "The Arena", blurb: "your idea vs three rivals" },
@@ -137,8 +117,6 @@
     pendingEnd: null,
   };
 
-  // ── transport ──────────────────────────────────────────────────────────────
-
   function token() {
     return new URLSearchParams(window.location.search).get("token") || "";
   }
@@ -168,14 +146,12 @@
     }
     if (!response.ok) {
       if (response.status === 401) {
-        throw new Error("The door is locked — this link needs its ?token=.");
+        throw new Error("Locked — attach ?token= to this URL.");
       }
-      throw new Error((payload && payload.error) || "The room did not answer (" + response.status + ").");
+      throw new Error((payload && payload.error) || "Bridge error (" + response.status + ").");
     }
     return payload;
   }
-
-  // ── build the room ─────────────────────────────────────────────────────────
 
   function el(tag, className, text) {
     const node = document.createElement(tag);
@@ -184,27 +160,49 @@
     return node;
   }
 
-  // ── the program ────────────────────────────────────────────────────────────
+  // ── Drawers ────────────────────────────────────────────────────────────────
+
+  formatTrigger.addEventListener("click", () => {
+    const open = castDrawer.hidden;
+    castDrawer.hidden = !open;
+    wireDrawer.hidden = true;
+    formatTrigger.setAttribute("aria-expanded", String(open));
+  });
+
+  drawerClose.addEventListener("click", () => {
+    castDrawer.hidden = true;
+    formatTrigger.setAttribute("aria-expanded", "false");
+  });
+
+  wire.addEventListener("click", () => {
+    const open = wireDrawer.hidden;
+    wireDrawer.hidden = !open;
+    castDrawer.hidden = true;
+    wire.setAttribute("aria-expanded", String(open));
+  });
+
+  wireClose.addEventListener("click", () => {
+    wireDrawer.hidden = true;
+    wire.setAttribute("aria-expanded", "false");
+  });
+
+  // ── Program & Call Sheet ───────────────────────────────────────────────────
 
   function renderProgram() {
     programList.textContent = "";
     PROGRAM.forEach((entry) => {
-      const item = document.createElement("li");
       const button = el("button");
       button.type = "button";
       button.appendChild(el("strong", "", entry.name));
       button.appendChild(
-        el("span", "", entry.mode === "custom" ? state.custom.length + " called, one turn each" : entry.blurb)
+        el("span", "", entry.mode === "custom" ? state.custom.length + " called" : entry.blurb)
       );
       if (entry.key === state.format.key) button.setAttribute("aria-current", "true");
       button.disabled = state.active;
       button.addEventListener("click", () => chooseFormat(entry));
-      item.appendChild(button);
-      programList.appendChild(item);
+      programList.appendChild(button);
     });
   }
-
-  // ── the call sheet: choose who sits down ──────────────────────────────────
 
   function memberFor(id) {
     const member = state.roster.find((entry) => entry.id === id);
@@ -214,9 +212,9 @@
   function renderCallSheet() {
     callList.textContent = "";
     callCount.textContent =
-      state.custom.length + (state.custom.length >= MAX_CAST ? " called · max" : " called");
+      state.custom.length + (state.custom.length >= MAX_CAST ? " / 5 MAX" : " CALLED");
     if (!state.roster.length) {
-      callList.appendChild(el("span", "call-empty", "the call sheet did not load."));
+      callList.appendChild(el("span", "", "Roster unavailable."));
       return;
     }
     const groups = new Map();
@@ -239,13 +237,10 @@
         input.addEventListener("change", () => toggleMember(member.id, input.checked));
         label.appendChild(input);
         const swatch = el("span", "swatch");
-        swatch.style.setProperty("--tone", member.persona.color || "#8a6a2f");
+        swatch.style.setProperty("--tone", member.persona.color || "#e9c46a");
         label.appendChild(swatch);
         label.appendChild(el("span", "", member.persona.name));
-        if (!checked && full) {
-          label.dataset.off = "true";
-          label.title = "five is the table's limit";
-        }
+        if (!checked && full) label.dataset.off = "true";
         box.appendChild(label);
       });
       callList.appendChild(box);
@@ -263,16 +258,8 @@
 
   function toggleMember(id, checked) {
     if (state.active) return;
-    if (checked && state.custom.length >= MAX_CAST) {
-      note.textContent = "five is the table's limit. uncheck someone first.";
-      renderCallSheet();
-      return;
-    }
-    if (!checked && state.custom.length <= 1) {
-      note.textContent = "someone has to sit down.";
-      renderCallSheet();
-      return;
-    }
+    if (checked && state.custom.length >= MAX_CAST) return;
+    if (!checked && state.custom.length <= 1) return;
     if (state.done) resetRoom();
     state.custom = checked
       ? state.custom.concat([id])
@@ -280,13 +267,11 @@
     state.customCast = state.custom.map(memberFor).filter(Boolean);
     state.format = PROGRAM.find((entry) => entry.key === "custom") || state.format;
     programName.textContent = state.format.name;
-    caseHint.textContent = formatHint();
     stamp.hidden = true;
     renderCast(state.customCast);
     renderProgram();
     resetWire();
     renderCallSheet();
-    note.textContent = state.custom.length + " on the call sheet.";
   }
 
   async function loadRoster() {
@@ -334,52 +319,20 @@
     renderCallSheet();
   }
 
-  // ── the dial: clinical at 0, unhinged at 11 ────────────────────────────────
+  // ── Heat Dial (0–11) ───────────────────────────────────────────────────────
 
   function dialProfile(value) {
     const v = Number(value);
     if (v <= 2) {
-      return {
-        temperature: 0.3 + v * 0.05,
-        max_tokens: 220,
-        top_p: 0.85,
-        frequency_penalty: 0.25,
-        presence_penalty: 0,
-        styles: ["terse"],
-        label: "clinical",
-      };
+      return { temperature: 0.3 + v * 0.05, max_tokens: 220, top_p: 0.85, frequency_penalty: 0.25, presence_penalty: 0, styles: ["terse"], label: "clinical" };
     }
     if (v <= 5) {
-      return {
-        temperature: 0.5 + (v - 3) * 0.075,
-        max_tokens: 320,
-        top_p: 0.9,
-        frequency_penalty: 0.18,
-        presence_penalty: 0,
-        styles: ["nosyco"],
-        label: "measured",
-      };
+      return { temperature: 0.5 + (v - 3) * 0.075, max_tokens: 320, top_p: 0.9, frequency_penalty: 0.18, presence_penalty: 0, styles: ["nosyco"], label: "measured" };
     }
     if (v <= 8) {
-      return {
-        temperature: 0.75 + (v - 6) * 0.075,
-        max_tokens: 460,
-        top_p: 0.92,
-        frequency_penalty: 0.1,
-        presence_penalty: 0.05,
-        styles: [],
-        label: "loose",
-      };
+      return { temperature: 0.75 + (v - 6) * 0.075, max_tokens: 460, top_p: 0.92, frequency_penalty: 0.1, presence_penalty: 0.05, styles: [], label: "loose" };
     }
-    return {
-      temperature: 1.0 + (v - 9) * 0.075,
-      max_tokens: 620,
-      top_p: 0.96,
-      frequency_penalty: 0.05,
-      presence_penalty: 0.12,
-      styles: [],
-      label: "unhinged",
-    };
+    return { temperature: 1.0 + (v - 9) * 0.075, max_tokens: 620, top_p: 0.96, frequency_penalty: 0.05, presence_penalty: 0.12, styles: [], label: "unhinged" };
   }
 
   function renderDial() {
@@ -387,6 +340,8 @@
     const profile = dialProfile(state.dial);
     dialValue.textContent = String(state.dial);
     dialLabel.textContent = profile.label;
+    const glow = (0.15 + (state.dial / 11) * 0.55).toFixed(2);
+    document.documentElement.style.setProperty("--heat-glow", `rgba(230, 57, 70, ${glow})`);
   }
 
   dial.addEventListener("input", renderDial);
@@ -394,25 +349,20 @@
   dialRoll.addEventListener("click", () => {
     dial.value = String(Math.floor(Math.random() * 12));
     renderDial();
-    note.textContent = "the dial landed on " + state.dial + ".";
+    setIdleStatus("Dial rolled to " + state.dial + " (" + dialProfile(state.dial).label + ").");
   });
 
-  // ── read aloud: one house voice per character, mapped by key ───────────────
+  // ── Voice Synthesis & Dictation ────────────────────────────────────────────
 
   let speechVoices = [];
-
   function loadVoices() {
-    if (!window.speechSynthesis) return;
-    speechVoices = window.speechSynthesis.getVoices() || [];
+    if (window.speechSynthesis) speechVoices = window.speechSynthesis.getVoices() || [];
   }
-
   if (window.speechSynthesis) {
     loadVoices();
     window.speechSynthesis.onvoiceschanged = loadVoices;
   } else {
     voiceButton.disabled = true;
-    voiceButton.textContent = "VOICE UNAVAILABLE";
-    voiceButton.title = "This browser has no speech synthesis.";
   }
 
   function voiceFor(key) {
@@ -425,16 +375,13 @@
     return {
       voice: pool[hash % pool.length],
       pitch: 0.78 + ((hash >> 3) % 5) * 0.09,
-      rate: 0.92 + ((hash >> 5) % 3) * 0.06,
+      rate: 0.94 + ((hash >> 5) % 3) * 0.06,
     };
   }
 
   function readAloud(key, text, interrupt) {
     if (!window.speechSynthesis || !window.SpeechSynthesisUtterance || !text) return;
-    const spoken = String(text)
-      .replace(/[*_#`>]/g, "")
-      .replace(/\s+/g, " ")
-      .trim();
+    const spoken = String(text).replace(/[*_#`>]/g, "").replace(/\s+/g, " ").trim();
     if (!spoken) return;
     if (interrupt) window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(spoken.slice(0, 1400));
@@ -456,25 +403,25 @@
     if (!window.speechSynthesis) return;
     state.voice = !state.voice;
     voiceButton.setAttribute("aria-pressed", String(state.voice));
-    voiceButton.textContent = state.voice ? "🔊 VOICE ON" : "🔇 VOICE OFF";
+    voiceButton.textContent = state.voice ? "🔊" : "🔇";
     if (state.voice && window.SpeechSynthesisUtterance) {
-      // Unlock speech inside the click gesture; iOS will not start it later.
       const primer = new SpeechSynthesisUtterance(" ");
       primer.volume = 0;
       window.speechSynthesis.speak(primer);
     }
     if (!state.voice) stopSpeech();
-    note.textContent = state.voice ? "the room will read its turns aloud." : "the room goes quiet.";
   });
 
-  // ── dictation: the case, spoken ────────────────────────────────────────────
+  replayBtn.addEventListener("click", () => {
+    if (state.openKey && state.lines[state.openKey]) {
+      readAloud(state.openKey, state.lines[state.openKey], true);
+    }
+  });
 
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   let recognition = null;
-
   if (!SpeechRecognition) {
     micButton.disabled = true;
-    micButton.title = "This browser has no speech recognition. Chrome, Edge, or Safari can dictate.";
   } else {
     micButton.addEventListener("click", () => {
       if (state.listening) {
@@ -488,7 +435,7 @@
       recognition.onstart = () => {
         state.listening = true;
         micButton.setAttribute("aria-pressed", "true");
-        note.textContent = "listening — speak the case.";
+        setIdleStatus("Listening… speak your directive.");
       };
       recognition.onresult = (event) => {
         let heard = "";
@@ -497,11 +444,8 @@
         }
         caseInput.value = heard.trim();
       };
-      recognition.onerror = (event) => {
-        note.textContent =
-          event.error === "not-allowed"
-            ? "the mic is blocked. allow it in the browser."
-            : "the mic dropped. type it instead.";
+      recognition.onerror = () => {
+        setIdleStatus("Mic unavailable — type your directive below.");
       };
       recognition.onend = () => {
         state.listening = false;
@@ -511,78 +455,44 @@
       try {
         recognition.start();
       } catch (error) {
-        note.textContent = "the mic is already listening.";
+        /* ignore double start */
       }
     });
   }
 
-  // ── the wire ───────────────────────────────────────────────────────────────
-
-  wire.addEventListener("click", () => {
-    const open = !wire.classList.contains("open");
-    wire.classList.toggle("open", open);
-    wire.setAttribute("aria-expanded", String(open));
-  });
+  // ── Scout Wire ─────────────────────────────────────────────────────────────
 
   function resetWire() {
     wire.hidden = true;
-    wire.classList.remove("open");
-    wire.setAttribute("aria-expanded", "false");
-    wireCount.textContent = "sweeping…";
-    wireNote.textContent = "scouts on the case";
+    wireDrawer.hidden = true;
+    wireCount.textContent = "0";
     wireList.textContent = "";
-  }
-
-  function timeLabel(value) {
-    try {
-      return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    } catch (error) {
-      return "just now";
-    }
   }
 
   function renderWire(scouts) {
     wire.hidden = false;
     wireList.textContent = "";
     if (!scouts) {
-      wireCount.textContent = "no sweep";
-      wireNote.textContent = "the bridge returned no scout report";
+      wireCount.textContent = "0";
+      wireNote.textContent = "SCOUT WIRE // NO REPORT";
       return;
     }
-    const counts = scouts.counts || {};
     const signals = Array.isArray(scouts.signals) ? scouts.signals : [];
     const anchors = Array.isArray(scouts.market_anchors) ? scouts.market_anchors : [];
-    const signalCount = counts.signals === undefined ? signals.length : counts.signals;
-    const priceCount =
-      counts.prices === undefined ? (Array.isArray(scouts.prices) ? scouts.prices.length : 0) : counts.prices;
-    wireCount.textContent =
-      signalCount + " signal" + (signalCount === 1 ? "" : "s") +
-      " · " + priceCount + " price" + (priceCount === 1 ? "" : "s");
-    wireNote.textContent = scouts.generated_at
-      ? "swept " + timeLabel(scouts.generated_at)
-      : "scouts on the case";
-
-    signals.slice(0, 3).forEach((signal) => {
-      wireList.appendChild(
-        el("span", "wire-item", "[" + (signal.source || "wire") + "] " + (signal.title || "untitled"))
-      );
+    wireCount.textContent = String(signals.length + anchors.length);
+    wireNote.textContent = `SCOUT WIRE // ${signals.length} SIGNALS · ${anchors.length} ANCHORS`;
+    signals.slice(0, 4).forEach((s) => {
+      wireList.appendChild(el("div", "wire-item", `[${s.source || "wire"}] ${s.title || "signal"}`));
     });
-    anchors.slice(0, 3).forEach((anchor) => {
-      wireList.appendChild(
-        el("span", "wire-item", "PRICE " + (anchor.competitor || "market") + " — " + (anchor.price || "unknown"))
-      );
+    anchors.slice(0, 4).forEach((a) => {
+      wireList.appendChild(el("div", "wire-item", `PRICE ${a.competitor || "market"} — ${a.price || "unknown"}`));
     });
     if (!wireList.childElementCount) {
-      wireList.appendChild(el("span", "wire-item", "The wire is quiet for this case."));
+      wireList.appendChild(el("div", "wire-item", "Wire quiet for this query."));
     }
   }
 
-  function formatHint() {
-    if (state.format.mode === "custom") {
-      return "your call — " + state.custom.length + " taking a seat";
-    }
-    return state.format.blurb;
-  }
+  // ── 3D Elliptical Orbit Cast & Focus Spotlight ─────────────────────────────
 
   async function castFor(entry) {
     if (entry.mode === "custom") return state.customCast;
@@ -595,7 +505,8 @@
   }
 
   async function chooseFormat(entry) {
-    program.open = false;
+    castDrawer.hidden = true;
+    formatTrigger.setAttribute("aria-expanded", "false");
     if (state.active) return;
     if (entry.key === state.format.key) {
       if (state.done) resetRoom();
@@ -606,161 +517,120 @@
     try {
       cast = await castFor(entry);
     } catch (error) {
-      note.textContent = error.message;
+      setIdleStatus(error.message);
       return;
     }
-    if (!cast || !cast.length) {
-      if (entry.mode === "custom") {
-        program.open = true;
-        note.textContent = "the call sheet is blank. pick at least one name.";
-      } else {
-        note.textContent = "that room did not answer.";
-      }
-      return;
-    }
+    if (!cast || !cast.length) return;
     state.format = entry;
     programName.textContent = entry.name;
-    caseHint.textContent = formatHint();
     stamp.hidden = true;
     renderCast(cast);
     renderProgram();
     resetWire();
     if (entry.mode !== "custom") syncCallSheet(cast, entry);
-    note.textContent = entry.name + " is seated.";
+    setIdleStatus(entry.name + " seated. Pitch the pit.");
   }
 
   function renderCast(cast) {
     state.cast = cast;
     castBox.textContent = "";
-    const seats = SEATS[cast.length] || SEATS[5];
+    castBox.classList.remove("has-speaker");
+    const count = cast.length;
     cast.forEach((persona, index) => {
-      const seat = seats[index] || seats[seats.length - 1];
-      castBox.appendChild(buildActor(persona, index, seat));
+      // Distribute in a 3D perspective arc (front-left, back-arc, front-right)
+      const angle = ((index + 0.5) / count) * Math.PI * 1.35 + Math.PI * 0.825;
+      const x = 50 + Math.cos(angle) * 38;
+      const y = 48 + Math.sin(angle) * 26;
+      const depthNorm = (Math.sin(angle) + 1) / 2; // 0 = far back, 1 = front
+      const depthScale = (0.84 + depthNorm * 0.24).toFixed(2);
+      const z = Math.round(10 + depthNorm * 15);
+
+      const actor = el("article", "actor");
+      actor.dataset.key = persona.key;
+      actor.style.left = x.toFixed(1) + "%";
+      actor.style.top = y.toFixed(1) + "%";
+      actor.style.setProperty("--depth-scale", depthScale);
+      actor.style.setProperty("--z", String(z));
+      actor.style.setProperty("--tone", persona.color || "#e9c46a");
+      actor.style.setProperty("--delay", (index * 0.45).toFixed(2) + "s");
+
+      const figure = el("button", "figure");
+      figure.type = "button";
+      figure.setAttribute("aria-label", persona.name);
+
+      figure.appendChild(el("span", "bust-halo"));
+      const head = el("span", "bust-head");
+      head.appendChild(el("span", "visor"));
+      figure.appendChild(head);
+      figure.appendChild(el("span", "bust-shoulders"));
+
+      const prop = el("span", "prop", persona.emoji || "●");
+      prop.setAttribute("aria-hidden", "true");
+      figure.appendChild(prop);
+
+      figure.addEventListener("click", () => {
+        const line = state.lines[persona.key];
+        focusPersona(persona.key, line || `${persona.name} (${roleFor(persona.key)}) — waiting for the pitch.`);
+      });
+
+      const rail = el("div", "heat-rail");
+      rail.appendChild(el("div", "heat-fill"));
+
+      actor.appendChild(figure);
+      actor.appendChild(el("span", "nametag", persona.name));
+      actor.appendChild(rail);
+      castBox.appendChild(actor);
     });
   }
 
-  function buildActor(persona, index, seat) {
-    const actor = el("article", "actor");
-    actor.dataset.key = persona.key;
-    actor.style.left = seat.left + "%";
-    actor.style.top = seat.top + "%";
-    actor.dataset.side = seat.side;
-    actor.dataset.row = seat.row;
-    actor.style.setProperty("--tone", persona.color || "#31795a");
-    actor.style.setProperty("--delay", (index * 0.6).toFixed(2) + "s");
-
-    const figure = el("button", "figure");
-    figure.type = "button";
-    figure.setAttribute("aria-label", persona.name + " — " + roleFor(persona.key));
-    figure.setAttribute("aria-expanded", "false");
-    figure.setAttribute("aria-controls", "dossier-" + persona.key);
-
-    const head = el("span", "head");
-    head.appendChild(el("span", "eye left"));
-    head.appendChild(el("span", "eye right"));
-    head.appendChild(el("span", "mouth"));
-    figure.appendChild(head);
-    figure.appendChild(el("span", "torso"));
-
-    const prop = el("span", "prop", persona.emoji || "●");
-    prop.setAttribute("aria-hidden", "true");
-    figure.appendChild(prop);
-
-    const bubble = el("div", "bubble");
-    bubble.appendChild(el("p", "bubble-text"));
-    bubble.title = "Click to hear this turn";
-    bubble.addEventListener("click", () =>
-      readAloud(persona.key, state.lines[persona.key] || "", true)
-    );
-
-    const said = el("button", "said");
-    said.type = "button";
-    said.setAttribute("aria-label", "Show " + persona.name + "’s last turn");
-
-    const dossier = el("div", "dossier");
-    dossier.id = "dossier-" + persona.key;
-    dossier.appendChild(el("span", "dossier-role", roleFor(persona.key)));
-    dossier.appendChild(el("h2", "dossier-name", persona.name));
-    dossier.appendChild(el("span", "dossier-model", persona.model || "house model"));
-    dossier.appendChild(el("p", "dossier-line", "Hasn’t spoken yet."));
-
-    figure.addEventListener("click", () => toggleDossier(actor, figure, dossier));
-    said.addEventListener("click", () => speak(persona.key, state.lines[persona.key] || ""));
-
-    actor.appendChild(figure);
-    actor.appendChild(el("span", "nametag", persona.name));
-    actor.appendChild(bubble);
-    actor.appendChild(said);
-    actor.appendChild(dossier);
-    return actor;
-  }
-
   function roleFor(key) {
-    return ROLES[key] || "sits on the panel";
+    return ROLES[key] || "panelist";
   }
 
   function actorFor(key) {
     return castBox.querySelector('.actor[data-key="' + key + '"]');
   }
 
-  function toggleDossier(actor, figure, dossier) {
-    const open = !dossier.classList.contains("open");
-    castBox.querySelectorAll(".dossier.open").forEach((node) => node.classList.remove("open"));
-    castBox.querySelectorAll('.figure[aria-expanded="true"]').forEach((node) => {
-      node.setAttribute("aria-expanded", "false");
-    });
-    if (!open) return;
-    dossier.classList.add("open");
-    figure.setAttribute("aria-expanded", "true");
-    const key = actor.dataset.key;
-    const line = dossier.querySelector(".dossier-line");
-    line.textContent = (state.lines[key] || "").trim() || "Hasn’t spoken yet.";
+  function setIdleStatus(text) {
+    castBox.classList.remove("has-speaker");
+    castBox.querySelectorAll(".actor").forEach((a) => a.classList.remove("is-focused", "speaking"));
+    activeSpeaker.textContent = "STANDBY";
+    activeRole.textContent = state.format.name.toLowerCase();
+    speechStage.style.removeProperty("--active-tone");
+    replayBtn.hidden = true;
+    activeSpeech.textContent = "";
+    activeSpeech.appendChild(el("p", "idle-prompt", text));
   }
 
-  // ── speech ─────────────────────────────────────────────────────────────────
-
-  function speak(key, text) {
+  function focusPersona(key, text, isLiveStream) {
     if (!key) return;
-    if (state.openKey && state.openKey !== key) collapse(state.openKey);
-    const actor = actorFor(key);
-    if (!actor) return;
-    castBox.querySelectorAll(".actor.speaking").forEach((node) => {
-      if (node.dataset.key !== key) node.classList.remove("speaking");
-    });
-    state.openKey = key;
-    actor.classList.add("open");
-    actor.classList.remove("thinking");
-    actor.querySelector(".bubble-text").textContent = text || "";
-    actor.querySelector(".said").textContent = "";
-  }
-
-  function collapse(key) {
-    const actor = actorFor(key);
-    if (!actor) return;
-    actor.classList.remove("open");
-    const text = (state.lines[key] || "").trim();
-    const said = actor.querySelector(".said");
-    if (text) {
-      said.textContent = "“" + (text.length > 70 ? text.slice(0, 70).trim() + "…" : text) + "”";
-    }
-    if (state.openKey === key) state.openKey = null;
-  }
-
-  function setThinking(key) {
-    castBox.querySelectorAll(".actor.thinking").forEach((node) => node.classList.remove("thinking"));
-    if (!key) return;
-    const actor = actorFor(key);
-    if (!actor) return;
-    actor.classList.add("thinking");
     const persona = state.cast.find((item) => item.key === key);
-    note.textContent = (persona ? persona.name : key) + " is thinking";
+    const tone = (persona && persona.color) || "#e9c46a";
+
+    castBox.classList.add("has-speaker");
+    castBox.querySelectorAll(".actor").forEach((node) => {
+      const match = node.dataset.key === key;
+      node.classList.toggle("is-focused", match);
+      if (!match) node.classList.remove("speaking");
+      else if (isLiveStream) node.classList.add("speaking");
+    });
+
+    state.openKey = key;
+    activeSpeaker.textContent = persona ? persona.name : key;
+    activeRole.textContent = roleFor(key);
+    speechStage.style.setProperty("--active-tone", tone);
+    replayBtn.hidden = !state.lines[key];
+
+    activeSpeech.textContent = text || "";
+    activeSpeech.scrollTop = activeSpeech.scrollHeight;
   }
 
-  // ── the session ────────────────────────────────────────────────────────────
+  // ── Session Execution & SSE ────────────────────────────────────────────────
 
   async function begin(topic) {
     if (state.active) return;
-    program.open = false;
+    castDrawer.hidden = true;
+    wireDrawer.hidden = true;
     state.active = true;
     state.done = false;
     state.since = 0;
@@ -782,20 +652,10 @@
     strip.hidden = true;
     followForm.hidden = true;
     renderCallSheet();
-    castBox.querySelectorAll(".actor").forEach((actor) => {
-      actor.classList.remove("open", "speaking", "thinking");
-      actor.querySelector(".said").textContent = "";
-      actor.querySelector(".dossier").classList.remove("open");
-      const figure = actor.querySelector(".figure");
-      if (figure) figure.setAttribute("aria-expanded", "false");
-    });
-    note.textContent = "seating the room…";
-    renderProgram();
     resetWire();
-    wire.hidden = false;
-    wireCount.textContent = "sweeping…";
-    wireNote.textContent = "scouts on the case";
     room.dataset.phase = "live";
+    setIdleStatus("Convening the room…");
+
     try {
       const profile = dialProfile(state.dial);
       const body = {
@@ -861,7 +721,7 @@
       source.close();
       state.retries += 1;
       if (state.retries > 4) {
-        fail("The room went dark. On a free host it may have gone to sleep — reload to wake it.");
+        fail("Connection dropped. Reload to wake the host.");
         return;
       }
       window.setTimeout(() => {
@@ -882,12 +742,10 @@
       case "session_start":
         if (Array.isArray(payload.personas) && payload.personas.length) renderCast(payload.personas);
         room.dataset.phase = "live";
-        note.textContent = payload.topic ? "the case: " + payload.topic : "the room is seated";
         break;
       case "status":
         if (state.demoPacing) break;
-        setThinking(payload.persona || null);
-        if (payload.message) note.textContent = payload.message;
+        if (payload.persona) focusPersona(payload.persona, payload.message || "Thinking…", false);
         break;
       case "token_chunk": {
         if (state.demoPacing) break;
@@ -898,12 +756,7 @@
           state.passSpeakers.add(key);
         }
         state.lines[key] = (state.lines[key] || "") + (payload.text || "");
-        const actor = actorFor(key);
-        if (actor) {
-          actor.classList.add("speaking");
-          actor.classList.remove("thinking");
-        }
-        speak(key, state.lines[key]);
+        focusPersona(key, state.lines[key], true);
         break;
       }
       case "persona_turn":
@@ -914,23 +767,14 @@
           presentTurn(payload);
         }
         break;
-      case "operator_message":
-        note.textContent = "a note slides across the table.";
-        break;
       case "iteration_start":
         state.freshPass = true;
         state.passSpeakers.clear();
-        note.textContent = "the room leans back in.";
-        break;
-      case "memory_saved":
         break;
       case "error":
-        fail(payload.message || "The room hit a fault.");
+        fail(payload.message || "Session error.");
         break;
       case "session_end":
-        // The job is over even if the demo is still revealing its turns.
-        // Close the stream now so EventSource does not reconnect and trip the
-        // "room went dark" fallback while the last beats play out.
         state.done = true;
         closeStream();
         if (state.demoPacing && (state.turnQueue.length || state.turnTimer)) {
@@ -950,26 +794,17 @@
     state.lines[key] = payload.content || state.lines[key] || "";
     const actor = actorFor(key);
     if (actor) actor.classList.remove("speaking");
-    speak(key, state.lines[key]);
+    focusPersona(key, state.lines[key], false);
     if (state.voice) readAloud(key, state.lines[key], false);
-    setThinking(null);
-    if (state.demoPacing) {
-      const persona = state.cast.find((item) => item.key === key);
-      if (persona) note.textContent = persona.name + " has the floor.";
-    }
   }
 
-  // The demo provider answers instantly. Give each turn a beat so the room is
-  // watchable instead of flashing the whole transcript at once.
   function drainTurns() {
     if (state.turnTimer) return;
     if (state.turnQueue.length) {
       const payload = state.turnQueue.shift();
       presentTurn(payload);
-      const words = String(state.lines[payload.persona] || "")
-        .split(/\s+/)
-        .filter(Boolean).length;
-      const beat = Math.min(7000, Math.max(3000, words * 80));
+      const words = String(state.lines[payload.persona] || "").split(/\s+/).filter(Boolean).length;
+      const beat = Math.min(6500, Math.max(2800, words * 75));
       state.turnTimer = window.setTimeout(() => {
         state.turnTimer = null;
         drainTurns();
@@ -982,7 +817,7 @@
       state.turnTimer = window.setTimeout(() => {
         state.turnTimer = null;
         finish(payload);
-      }, 900);
+      }, 800);
     }
   }
 
@@ -990,25 +825,15 @@
     state.done = true;
     state.active = false;
     state.transcript = payload.transcript || "";
-    setThinking(null);
     closeStream();
     room.dataset.phase = "verdict";
     castBox.querySelectorAll(".actor.speaking").forEach((actor) => actor.classList.remove("speaking"));
     stamp.dataset.tone = "verdict";
-    stamp.textContent = payload.follow_up
-      ? "second opinion filed"
-      : state.format.mode === "custom"
-        ? "the call is filed"
-        : "autopsy filed";
+    stamp.textContent = "VERDICT IN — TAP ANY CHARACTER TO INSPECT OR PUSH BACK BELOW";
     stamp.hidden = false;
     strip.hidden = !state.transcript;
-    wire.classList.remove("open");
-    wire.setAttribute("aria-expanded", "false");
     followForm.hidden = false;
     followInput.value = "";
-    gavel.setAttribute("aria-label", "Clear the table for a new case");
-    gavel.title = "Clear the table for a new case";
-    note.textContent = payload.stopped ? "the gavel came down." : "the room is done. ask again, or tear off the transcript.";
     renderProgram();
     renderCallSheet();
   }
@@ -1023,18 +848,14 @@
       state.turnTimer = null;
     }
     closeStream();
-    setThinking(null);
     room.dataset.phase = "lobby";
     stopSpeech();
     stamp.dataset.tone = "fault";
-    stamp.textContent = message || "fault";
+    stamp.textContent = message || "FAULT";
     stamp.hidden = false;
-    note.textContent = "the room reset. pull the case file back over when ready.";
     renderProgram();
     renderCallSheet();
   }
-
-  // ── objects that do things ─────────────────────────────────────────────────
 
   caseForm.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -1054,7 +875,6 @@
     strip.hidden = true;
     followForm.hidden = true;
     room.dataset.phase = "live";
-    note.textContent = "the room leans back in.";
     try {
       await api("/sessions/" + state.sessionId + "/messages", {
         method: "POST",
@@ -1085,25 +905,14 @@
     state.freshPass = false;
     state.passSpeakers.clear();
     state.retries = 0;
-    castBox.querySelectorAll(".actor").forEach((actor) => {
-      actor.classList.remove("open", "speaking", "thinking");
-      actor.querySelector(".bubble-text").textContent = "";
-      actor.querySelector(".said").textContent = "";
-      actor.querySelector(".dossier").classList.remove("open");
-      const figure = actor.querySelector(".figure");
-      if (figure) figure.setAttribute("aria-expanded", "false");
-    });
     stamp.hidden = true;
     strip.hidden = true;
     followForm.hidden = true;
     resetWire();
     caseInput.value = "";
-    caseHint.textContent = formatHint();
     renderCallSheet();
-    gavel.setAttribute("aria-label", "Stop the session");
-    gavel.title = "Stop the session";
     room.dataset.phase = "lobby";
-    note.textContent = "the table is clear. bring the next case.";
+    setIdleStatus("Arena cleared. Pitch the next case.");
     renderProgram();
   }
 
@@ -1121,18 +930,16 @@
     }
     if (state.done && !state.active) {
       resetRoom();
-      if (window.innerWidth > 1240) caseInput.focus({ preventScroll: true });
       return;
     }
     if (!state.sessionId || state.done) return;
-    note.textContent = "the gavel falls at the end of this turn.";
     try {
       await api("/sessions/" + state.sessionId + "/stop", {
         method: "POST",
         body: "{}",
       });
     } catch (error) {
-      note.textContent = error.message;
+      /* ignore */
     }
   });
 
@@ -1148,8 +955,6 @@
     link.remove();
     URL.revokeObjectURL(url);
   });
-
-  // ── boot ───────────────────────────────────────────────────────────────────
 
   async function loadHouse() {
     try {
@@ -1167,9 +972,9 @@
             : demo
               ? "DEMO"
               : "UNSET";
-      plaque.textContent = "HOUSE MODEL · " + house;
+      plaque.textContent = "HOUSE · " + house;
     } catch (error) {
-      plaque.textContent = "HOUSE MODEL · UNKNOWN";
+      plaque.textContent = "HOUSE · OFFLINE";
     }
   }
 
@@ -1177,21 +982,18 @@
     syncLinks();
     await loadRoster();
     programName.textContent = state.format.name;
-    caseHint.textContent = formatHint();
     renderProgram();
     let cast = state.customCast.length ? state.customCast : FALLBACK_CAST;
     try {
       const fetched = await castFor(state.format);
       if (fetched && fetched.length) cast = fetched;
     } catch (error) {
-      // The fallback cast keeps the room visible when the door is locked.
+      /* fallback cast */
     }
     renderCast(cast);
     syncCallSheet(cast, state.format);
     renderDial();
     loadHouse();
-    note.textContent = "one idea, one room. pick a cast or press return when ready.";
-    if (window.innerWidth > 1240) caseInput.focus({ preventScroll: true });
   }
 
   boot();
